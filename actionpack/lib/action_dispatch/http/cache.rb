@@ -69,17 +69,17 @@ module ActionDispatch
         end
 
         def date
-          if date_header = headers['Date']
+          if date_header = headers[DATE]
             Time.httpdate(date_header)
           end
         end
 
         def date?
-          headers.include?('Date')
+          headers.include?(DATE)
         end
 
         def date=(utc_time)
-          headers['Date'] = utc_time.httpdate
+          headers[DATE] = utc_time.httpdate
         end
 
         def etag=(etag)
@@ -89,10 +89,11 @@ module ActionDispatch
 
       private
 
+        DATE          = 'Date'.freeze
         LAST_MODIFIED = "Last-Modified".freeze
         ETAG          = "ETag".freeze
         CACHE_CONTROL = "Cache-Control".freeze
-        SPESHUL_KEYS  = %w[extras no-cache max-age public must-revalidate]
+        SPECIAL_KEYS  = Set.new(%w[extras no-cache max-age public must-revalidate])
 
         def cache_control_segments
           if cache_control = self[CACHE_CONTROL]
@@ -108,7 +109,7 @@ module ActionDispatch
           cache_control_segments.each do |segment|
             directive, argument = segment.split('=', 2)
 
-            if SPESHUL_KEYS.include? directive
+            if SPECIAL_KEYS.include? directive
               key = directive.tr('-', '_')
               cache_control[key.to_sym] = argument || true
             else

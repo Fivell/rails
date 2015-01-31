@@ -1,4 +1,3 @@
-
 module ActiveRecord
   # = Active Record Schema
   #
@@ -43,7 +42,7 @@ module ActiveRecord
 
       unless info[:version].blank?
         initialize_schema_migrations_table
-        assume_migrated_upto_version(info[:version], migrations_paths)
+        connection.assume_migrated_upto_version(info[:version], migrations_paths)
       end
     end
 

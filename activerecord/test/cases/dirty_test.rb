@@ -125,30 +125,30 @@ class DirtyTest < ActiveRecord::TestCase
   end
 
   def test_time_attributes_changes_without_time_zone
-    target = Class.new(ActiveRecord::Base)
-    target.table_name = 'pirates'
+    with_timezone_config aware_attributes: false do
+      target = Class.new(ActiveRecord::Base)
+      target.table_name = 'pirates'
 
-    target.time_zone_aware_attributes = false
+      # New record - no changes.
+      pirate = target.new
+      assert !pirate.created_on_changed?
+      assert_nil pirate.created_on_change
 
-    # New record - no changes.
-    pirate = target.new
-    assert !pirate.created_on_changed?
-    assert_nil pirate.created_on_change
+      # Saved - no changes.
+      pirate.catchphrase = 'arrrr, time zone!!'
+      pirate.save!
+      assert !pirate.created_on_changed?
+      assert_nil pirate.created_on_change
 
-    # Saved - no changes.
-    pirate.catchphrase = 'arrrr, time zone!!'
-    pirate.save!
-    assert !pirate.created_on_changed?
-    assert_nil pirate.created_on_change
-
-    # Change created_on.
-    old_created_on = pirate.created_on
-    pirate.created_on = Time.now + 1.day
-    assert pirate.created_on_changed?
-    # kind_of does not work because
-    # ActiveSupport::TimeWithZone.name == 'Time'
-    assert_instance_of Time, pirate.created_on_was
-    assert_equal old_created_on, pirate.created_on_was
+      # Change created_on.
+      old_created_on = pirate.created_on
+      pirate.created_on = Time.now + 1.day
+      assert pirate.created_on_changed?
+      # kind_of does not work because
+      # ActiveSupport::TimeWithZone.name == 'Time'
+      assert_instance_of Time, pirate.created_on_was
+      assert_equal old_created_on, pirate.created_on_was
+    end
   end
 
 
@@ -165,11 +165,11 @@ class DirtyTest < ActiveRecord::TestCase
     assert_equal parrot.name_change, parrot.title_change
   end
 
-  def test_reset_attribute!
+  def test_restore_attribute!
     pirate = Pirate.create!(:catchphrase => 'Yar!')
     pirate.catchphrase = 'Ahoy!'
 
-    pirate.reset_catchphrase!
+    pirate.restore_catchphrase!
     assert_equal "Yar!", pirate.catchphrase
     assert_equal Hash.new, pirate.changes
     assert !pirate.catchphrase_changed?
@@ -213,9 +213,11 @@ class DirtyTest < ActiveRecord::TestCase
       topic = target.create
       assert_nil topic.written_on
 
-      topic.written_on = ""
-      assert_nil topic.written_on
-      assert !topic.written_on_changed?
+      ["", nil].each do |value|
+        topic.written_on = value
+        assert_nil topic.written_on
+        assert !topic.written_on_changed?
+      end
     end
   end
 
@@ -243,6 +245,21 @@ class DirtyTest < ActiveRecord::TestCase
     assert !pirate.changed?
   end
 
+  def test_float_zero_to_string_zero_not_marked_as_changed
+    data = NumericData.new :temperature => 0.0
+    data.save!
+
+    assert_not data.changed?
+
+    data.temperature = '0'
+    assert_empty data.changes
+
+    data.temperature = '0.0'
+    assert_empty data.changes
+
+    data.temperature = '0.00'
+    assert_empty data.changes
+  end
 
   def test_zero_to_blank_marked_as_changed
     pirate = Pirate.new
@@ -292,16 +309,14 @@ class DirtyTest < ActiveRecord::TestCase
   def test_attribute_will_change!
     pirate = Pirate.create!(:catchphrase => 'arr')
 
-    pirate.catchphrase << ' matey'
     assert !pirate.catchphrase_changed?
-
     assert pirate.catchphrase_will_change!
     assert pirate.catchphrase_changed?
-    assert_equal ['arr matey', 'arr matey'], pirate.catchphrase_change
+    assert_equal ['arr', 'arr'], pirate.catchphrase_change
 
-    pirate.catchphrase << '!'
+    pirate.catchphrase << ' matey!'
     assert pirate.catchphrase_changed?
-    assert_equal ['arr matey', 'arr matey!'], pirate.catchphrase_change
+    assert_equal ['arr', 'arr matey!'], pirate.catchphrase_change
   end
 
   def test_association_assignment_changes_foreign_key
@@ -383,7 +398,7 @@ class DirtyTest < ActiveRecord::TestCase
   def test_dup_objects_should_not_copy_dirty_flag_from_creator
     pirate = Pirate.create!(:catchphrase => "shiver me timbers")
     pirate_dup = pirate.dup
-    pirate_dup.reset_catchphrase!
+    pirate_dup.restore_catchphrase!
     pirate.catchphrase = "I love Rum"
     assert pirate.catchphrase_changed?
     assert !pirate_dup.catchphrase_changed?
@@ -428,11 +443,20 @@ class DirtyTest < ActiveRecord::TestCase
   def test_save_should_store_serialized_attributes_even_with_partial_writes
     with_partial_writes(Topic) do
       topic = Topic.create!(:content => {:a => "a"})
+
+      assert_not topic.changed?
+
       topic.content[:b] = "b"
-      #assert topic.changed? # Known bug, will fail
+
+      assert topic.changed?
+
       topic.save!
+
+      assert_not topic.changed?
       assert_equal "b", topic.content[:b]
+
       topic.reload
+
       assert_equal "b", topic.content[:b]
     end
   end
@@ -567,6 +591,14 @@ class DirtyTest < ActiveRecord::TestCase
     end
   end
 
+  def test_datetime_attribute_doesnt_change_if_zone_is_modified_in_string
+    time_in_paris = Time.utc(2014, 1, 1, 12, 0, 0).in_time_zone('Paris')
+    pirate = Pirate.create!(:catchphrase => 'rrrr', :created_on => time_in_paris)
+
+    pirate.created_on = pirate.created_on.in_time_zone('Tokyo').to_s
+    assert !pirate.created_on_changed?
+  end
+
   test "partial insert" do
     with_partial_writes Person do
       jon = nil
@@ -591,18 +623,110 @@ class DirtyTest < ActiveRecord::TestCase
     end
   end
 
-  test "partial_updates config attribute is deprecated" do
-    klass = Class.new(ActiveRecord::Base)
+  test "defaults with type that implements `type_cast_for_database`" do
+    type = Class.new(ActiveRecord::Type::Value) do
+      def type_cast(value)
+        value.to_i
+      end
 
-    assert klass.partial_writes?
-    assert_deprecated { assert klass.partial_updates? }
-    assert_deprecated { assert klass.partial_updates  }
+      def type_cast_for_database(value)
+        value.to_s
+      end
+    end
 
-    assert_deprecated { klass.partial_updates = false }
+    model_class = Class.new(ActiveRecord::Base) do
+      self.table_name = 'numeric_data'
+      attribute :foo, type.new, default: 1
+    end
 
-    assert !klass.partial_writes?
-    assert_deprecated { assert !klass.partial_updates? }
-    assert_deprecated { assert !klass.partial_updates  }
+    model = model_class.new
+    assert_not model.foo_changed?
+
+    model = model_class.new(foo: 1)
+    assert_not model.foo_changed?
+
+    model = model_class.new(foo: '1')
+    assert_not model.foo_changed?
+  end
+
+  test "in place mutation detection" do
+    pirate = Pirate.create!(catchphrase: "arrrr")
+    pirate.catchphrase << " matey!"
+
+    assert pirate.catchphrase_changed?
+    expected_changes = {
+      "catchphrase" => ["arrrr", "arrrr matey!"]
+    }
+    assert_equal(expected_changes, pirate.changes)
+    assert_equal("arrrr", pirate.catchphrase_was)
+    assert pirate.catchphrase_changed?(from: "arrrr")
+    assert_not pirate.catchphrase_changed?(from: "anything else")
+    assert pirate.changed_attributes.include?(:catchphrase)
+
+    pirate.save!
+    pirate.reload
+
+    assert_equal "arrrr matey!", pirate.catchphrase
+    assert_not pirate.changed?
+  end
+
+  test "in place mutation for binary" do
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = :binaries
+      serialize :data
+    end
+
+    binary = klass.create!(data: "\\\\foo")
+
+    assert_not binary.changed?
+
+    binary.data = binary.data.dup
+
+    assert_not binary.changed?
+
+    binary = klass.last
+
+    assert_not binary.changed?
+
+    binary.data << "bar"
+
+    assert binary.changed?
+  end
+
+  test "attribute_changed? doesn't compute in-place changes for unrelated attributes" do
+    test_type_class = Class.new(ActiveRecord::Type::Value) do
+      define_method(:changed_in_place?) do |*|
+        raise
+      end
+    end
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = 'people'
+      attribute :foo, test_type_class.new
+    end
+
+    model = klass.new(first_name: "Jim")
+    assert model.first_name_changed?
+  end
+
+  test "attribute_will_change! doesn't try to save non-persistable attributes" do
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = 'people'
+      attribute :non_persisted_attribute, ActiveRecord::Type::String.new
+    end
+
+    record = klass.new(first_name: "Sean")
+    record.non_persisted_attribute_will_change!
+
+    assert record.non_persisted_attribute_changed?
+    assert record.save
+  end
+
+  test "mutating and then assigning doesn't remove the change" do
+    pirate = Pirate.create!(catchphrase: "arrrr")
+    pirate.catchphrase << " matey!"
+    pirate.catchphrase = "arrrr matey!"
+
+    assert pirate.catchphrase_changed?(from: "arrrr", to: "arrrr matey!")
   end
 
   private

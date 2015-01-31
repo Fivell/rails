@@ -1,7 +1,6 @@
 require 'erb'
 require 'yaml'
 require 'optparse'
-require 'rbconfig'
 
 module Rails
   class DBConsole
@@ -20,7 +19,7 @@ module Rails
       ENV['RAILS_ENV'] = options[:environment] || environment
 
       case config["adapter"]
-      when /^mysql/
+      when /^(jdbc)?mysql/
         args = {
           'host'      => '--host',
           'port'      => '--port',
@@ -44,7 +43,7 @@ module Rails
 
         find_cmd_and_exec(['mysql', 'mysql5'], *args)
 
-      when "postgresql", "postgres"
+      when /^postgres|^postgis/
         ENV['PGUSER']     = config["username"] if config["username"]
         ENV['PGHOST']     = config["host"] if config["host"]
         ENV['PGPORT']     = config["port"].to_s if config["port"]
@@ -74,6 +73,21 @@ module Rails
 
         find_cmd_and_exec('sqlplus', logon)
 
+      when "sqlserver"
+        args = []
+
+        args += ["-D", "#{config['database']}"] if config['database']
+        args += ["-U", "#{config['username']}"] if config['username']
+        args += ["-P", "#{config['password']}"] if config['password']
+
+        if config['host']
+          host_arg = "#{config['host']}"
+          host_arg << ":#{config['port']}" if config['port']
+          args += ["-S", host_arg]
+        end
+
+        find_cmd_and_exec("sqsh", *args)
+
       else
         abort "Unknown command-line client for #{config['database']}. Submit a Rails patch to add support!"
       end
@@ -81,14 +95,11 @@ module Rails
 
     def config
       @config ||= begin
-        cfg = begin
-          YAML.load(ERB.new(IO.read("config/database.yml")).result)
-        rescue SyntaxError, StandardError
-          require APP_PATH
-          Rails.application.config.database_configuration
+        if configurations[environment].blank?
+          raise ActiveRecord::AdapterNotSpecified, "'#{environment}' database is not configured. Available configuration: #{configurations.inspect}"
+        else
+          configurations[environment]
         end
-
-        cfg[environment] || abort("No database is configured for the environment '#{environment}'")
       end
     end
 
@@ -101,6 +112,12 @@ module Rails
     end
 
     protected
+
+    def configurations
+      require APP_PATH
+      ActiveRecord::Base.configurations = Rails.application.config.database_configuration
+      ActiveRecord::Base.configurations
+    end
 
     def parse_arguments(arguments)
       options = {}
@@ -154,13 +171,15 @@ module Rails
       commands = Array(commands)
 
       dirs_on_path = ENV['PATH'].to_s.split(File::PATH_SEPARATOR)
-      commands += commands.map{|cmd| "#{cmd}.exe"} if RbConfig::CONFIG['host_os'] =~ /mswin|mingw/
+      unless (ext = RbConfig::CONFIG['EXEEXT']).empty?
+        commands = commands.map{|cmd| "#{cmd}#{ext}"}
+      end
 
       full_path_command = nil
       found = commands.detect do |cmd|
         dirs_on_path.detect do |path|
           full_path_command = File.join(path, cmd)
-          File.executable? full_path_command
+          File.file?(full_path_command) && File.executable?(full_path_command)
         end
       end
 

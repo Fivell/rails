@@ -1,7 +1,7 @@
 require 'rails/railtie'
+require 'rails/engine/railties'
 require 'active_support/core_ext/module/delegation'
 require 'pathname'
-require 'rbconfig'
 
 module Rails
   # <tt>Rails::Engine</tt> allows you to wrap a specific Rails application or subset of
@@ -34,8 +34,9 @@ module Rails
   # == Configuration
   #
   # Besides the +Railtie+ configuration which is shared across the application, in a
-  # <tt>Rails::Engine</tt> you can access <tt>autoload_paths</tt> and <tt>autoload_once_paths</tt>,
-  # which, differently from a <tt>Railtie</tt>, are scoped to the current engine.
+  # <tt>Rails::Engine</tt> you can access <tt>autoload_paths</tt>, <tt>eager_load_paths</tt>
+  # and <tt>autoload_once_paths</tt>, which, differently from a <tt>Railtie</tt>, are scoped to
+  # the current engine.
   #
   #   class MyEngine < Rails::Engine
   #     # Add a load path for this specific Engine
@@ -100,17 +101,17 @@ module Rails
   #     paths["config"]              # => ["config"]
   #     paths["config/initializers"] # => ["config/initializers"]
   #     paths["config/locales"]      # => ["config/locales"]
-  #     paths["config/routes"]       # => ["config/routes.rb"]
+  #     paths["config/routes.rb"]    # => ["config/routes.rb"]
   #   end
   #
   # The <tt>Application</tt> class adds a couple more paths to this set. And as in your
   # <tt>Application</tt>, all folders under +app+ are automatically added to the load path.
-  # If you have an <tt>app/services/tt> folder for example, it will be added by default.
+  # If you have an <tt>app/services</tt> folder for example, it will be added by default.
   #
   # == Endpoint
   #
-  # An engine can be also a rack application. It can be useful if you have a rack application that
-  # you would like to wrap with +Engine+ and provide some of the +Engine+'s features.
+  # An engine can also be a rack application. It can be useful if you have a rack application that
+  # you would like to wrap with +Engine+ and provide with some of the +Engine+'s features.
   #
   # To do that, use the +endpoint+ method:
   #
@@ -122,7 +123,7 @@ module Rails
   #
   # Now you can mount your engine in application's routes just like that:
   #
-  #   MyRailsApp::Application.routes.draw do
+  #   Rails.application.routes.draw do
   #     mount MyEngine::Engine => "/engine"
   #   end
   #
@@ -152,7 +153,7 @@ module Rails
   # Note that now there can be more than one router in your application, and it's better to avoid
   # passing requests through many routers. Consider this situation:
   #
-  #   MyRailsApp::Application.routes.draw do
+  #   Rails.application.routes.draw do
   #     mount MyEngine::Engine => "/blog"
   #     get "/blog/omg" => "main#omg"
   #   end
@@ -162,7 +163,7 @@ module Rails
   # and if there is no such route in +Engine+'s routes, it will be dispatched to <tt>main#omg</tt>.
   # It's much better to swap that:
   #
-  #   MyRailsApp::Application.routes.draw do
+  #   Rails.application.routes.draw do
   #     get "/blog/omg" => "main#omg"
   #     mount MyEngine::Engine => "/blog"
   #   end
@@ -249,7 +250,7 @@ module Rails
   # created to allow you to do that. Consider such a scenario:
   #
   #   # config/routes.rb
-  #   MyApplication::Application.routes.draw do
+  #   Rails.application.routes.draw do
   #     mount MyEngine::Engine => "/my_engine", as: "my_engine"
   #     get "/foo" => "foo#index"
   #   end
@@ -258,7 +259,7 @@ module Rails
   #
   #   class FooController < ApplicationController
   #     def index
-  #       my_engine.root_url #=> /my_engine/
+  #       my_engine.root_url # => /my_engine/
   #     end
   #   end
   #
@@ -267,7 +268,7 @@ module Rails
   #   module MyEngine
   #     class BarController
   #       def index
-  #         main_app.foo_path #=> /foo
+  #         main_app.foo_path # => /foo
   #       end
   #     end
   #   end
@@ -349,13 +350,22 @@ module Rails
           Rails::Railtie::Configuration.eager_load_namespaces << base
 
           base.called_from = begin
-            # Remove the line number from backtraces making sure we don't leave anything behind
-            call_stack = caller.map { |p| p.sub(/:\d+.*/, '') }
+            call_stack = if Kernel.respond_to?(:caller_locations)
+              caller_locations.map { |l| l.absolute_path || l.path }
+            else
+              # Remove the line number from backtraces making sure we don't leave anything behind
+              caller.map { |p| p.sub(/:\d+.*/, '') }
+            end
+
             File.dirname(call_stack.detect { |p| p !~ %r[railties[\w.-]*/lib/rails|rack[\w.-]*/lib/rack] })
           end
         end
 
         super
+      end
+
+      def find_root(from)
+        find_root_with_flag "lib", from
       end
 
       def endpoint(endpoint = nil)
@@ -365,7 +375,7 @@ module Rails
       end
 
       def isolate_namespace(mod)
-        engine_name(generate_railtie_name(mod))
+        engine_name(generate_railtie_name(mod.name))
 
         self.routes.default_scope = { module: ActiveSupport::Inflector.underscore(mod.name) }
         self.isolated = true
@@ -389,7 +399,7 @@ module Rails
             end
 
             unless mod.respond_to?(:railtie_routes_url_helpers)
-              define_method(:railtie_routes_url_helpers) { railtie.routes.url_helpers }
+              define_method(:railtie_routes_url_helpers) {|include_path_helpers = true| railtie.routes.url_helpers(include_path_helpers) }
             end
           end
         end
@@ -423,7 +433,6 @@ module Rails
     # Load console and invoke the registered hooks.
     # Check <tt>Rails::Railtie.console</tt> for more info.
     def load_console(app=self)
-      require "pp"
       require "rails/console/app"
       require "rails/console/helpers"
       run_console_blocks(app)
@@ -445,7 +454,7 @@ module Rails
       self
     end
 
-    # Load rails generators and invoke the registered hooks.
+    # Load Rails generators and invoke the registered hooks.
     # Check <tt>Rails::Railtie.generators</tt> for more info.
     def load_generators(app=self)
       require "rails/generators"
@@ -455,10 +464,10 @@ module Rails
     end
 
     # Eager load the application by loading all ruby
-    # files inside autoload_paths.
+    # files inside eager_load paths.
     def eager_load!
-      config.autoload_paths.each do |load_path|
-        matcher = /\A#{Regexp.escape(load_path)}\/(.*)\.rb\Z/
+      config.eager_load_paths.each do |load_path|
+        matcher = /\A#{Regexp.escape(load_path.to_s)}\/(.*)\.rb\Z/
         Dir.glob("#{load_path}/**/*.rb").sort.each do |file|
           require_dependency file.sub(matcher, '\1')
         end
@@ -466,7 +475,7 @@ module Rails
     end
 
     def railties
-      @railties ||= self.class::Railties.new
+      @railties ||= Railties.new
     end
 
     # Returns a module with all the helpers defined for the engine.
@@ -504,7 +513,7 @@ module Rails
     def call(env)
       env.merge!(env_config)
       if env['SCRIPT_NAME']
-        env.merge! "ROUTES_#{routes.object_id}_SCRIPT_NAME" => env['SCRIPT_NAME'].dup
+        env["ROUTES_#{routes.object_id}_SCRIPT_NAME"] = env['SCRIPT_NAME'].dup
       end
       app.call(env)
     end
@@ -526,7 +535,7 @@ module Rails
 
     # Define the configuration object for the engine.
     def config
-      @config ||= Engine::Configuration.new(find_root_with_flag("lib"))
+      @config ||= Engine::Configuration.new(self.class.find_root(self.class.called_from))
     end
 
     # Load data from db/seeds.rb file. It can be used in to load engines'
@@ -551,20 +560,21 @@ module Rails
     #
     # This needs to be an initializer, since it needs to run once
     # per engine and get the engine as a block parameter
-    initializer :set_autoload_paths, before: :bootstrap_hook do |app|
+    initializer :set_autoload_paths, before: :bootstrap_hook do
       ActiveSupport::Dependencies.autoload_paths.unshift(*_all_autoload_paths)
       ActiveSupport::Dependencies.autoload_once_paths.unshift(*_all_autoload_once_paths)
 
       # Freeze so future modifications will fail rather than do nothing mysteriously
       config.autoload_paths.freeze
+      config.eager_load_paths.freeze
       config.autoload_once_paths.freeze
     end
 
     initializer :add_routing_paths do |app|
-      paths = self.paths["config/routes.rb"].existent
+      routing_paths = self.paths["config/routes.rb"].existent
 
-      if routes? || paths.any?
-        app.routes_reloader.paths.unshift(*paths)
+      if routes? || routing_paths.any?
+        app.routes_reloader.paths.unshift(*routing_paths)
         app.routes_reloader.route_sets << routes
       end
     end
@@ -589,12 +599,6 @@ module Rails
       end
     end
 
-    initializer :append_assets_path, group: :all do |app|
-      app.config.assets.paths.unshift(*paths["vendor/assets"].existent_directories)
-      app.config.assets.paths.unshift(*paths["lib/assets"].existent_directories)
-      app.config.assets.paths.unshift(*paths["app/assets"].existent_directories)
-    end
-
     initializer :prepend_helpers_path do |app|
       if !isolated? || (app == self)
         app.config.helpers_paths.unshift(*paths["app/helpers"].existent)
@@ -603,7 +607,7 @@ module Rails
 
     initializer :load_config_initializers do
       config.paths["config/initializers"].existent.sort.each do |initializer|
-        load(initializer)
+        load_config_initializer(initializer)
       end
     end
 
@@ -631,23 +635,28 @@ module Rails
       end
     end
 
+    def routes? #:nodoc:
+      @routes
+    end
+
     protected
+
+    def load_config_initializer(initializer)
+      ActiveSupport::Notifications.instrument('load_config_initializer.railties', initializer: initializer) do
+        load(initializer)
+      end
+    end
 
     def run_tasks_blocks(*) #:nodoc:
       super
       paths["lib/tasks"].existent.sort.each { |ext| load(ext) }
     end
 
-    def routes? #:nodoc:
-      @routes
-    end
-
     def has_migrations? #:nodoc:
       paths["db/migrate"].existent.any?
     end
 
-    def find_root_with_flag(flag, default=nil) #:nodoc:
-      root_path = self.class.called_from
+    def self.find_root_with_flag(flag, root_path, default=nil) #:nodoc:
 
       while root_path && File.directory?(root_path) && !File.exist?("#{root_path}/#{flag}")
         parent = File.dirname(root_path)
@@ -669,7 +678,7 @@ module Rails
     end
 
     def _all_autoload_paths #:nodoc:
-      @_all_autoload_paths ||= (config.autoload_paths + config.autoload_once_paths).uniq
+      @_all_autoload_paths ||= (config.autoload_paths + config.eager_load_paths + config.autoload_once_paths).uniq
     end
 
     def _all_load_paths #:nodoc:

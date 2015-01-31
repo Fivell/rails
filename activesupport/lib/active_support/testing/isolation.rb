@@ -1,96 +1,16 @@
-require 'rbconfig'
-begin
-  require 'minitest/parallel_each'
-rescue LoadError
-end
-
 module ActiveSupport
   module Testing
-    class RemoteError < StandardError
-
-      attr_reader :message, :backtrace
-
-      def initialize(exception)
-        @message = "caught #{exception.class.name}: #{exception.message}"
-        @backtrace = exception.backtrace
-      end
-    end
-
-    class ProxyTestResult
-      def initialize(calls = [])
-        @calls = calls
-      end
-
-      def add_error(e)
-        e = Test::Unit::Error.new(e.test_name, RemoteError.new(e.exception))
-        @calls << [:add_error, e]
-      end
-
-      def __replay__(result)
-        @calls.each do |name, args|
-          result.send(name, *args)
-        end
-      end
-
-      def marshal_dump
-        @calls
-      end
-
-      def marshal_load(calls)
-        initialize(calls)
-      end
-
-      def method_missing(name, *args)
-        @calls << [name, args]
-      end
-    end
-
     module Isolation
       require 'thread'
 
-      # Recent versions of MiniTest (such as the one shipped with Ruby 2.0) already define
-      # a ParallelEach class.
-      unless defined? ParallelEach
-        class ParallelEach
-          include Enumerable
-
-          # default to 2 cores
-          CORES = (ENV['TEST_CORES'] || 2).to_i
-
-          def initialize list
-            @list  = list
-            @queue = SizedQueue.new CORES
-          end
-
-          def grep pattern
-            self.class.new super
-          end
-
-          def each
-            threads = CORES.times.map {
-              Thread.new {
-                while job = @queue.pop
-                  yield job
-                end
-              }
-            }
-            @list.each { |i| @queue << i }
-            CORES.times { @queue << nil }
-            threads.each(&:join)
-          end
+      def self.included(klass) #:nodoc:
+        klass.class_eval do
+          parallelize_me!
         end
       end
 
-      def self.included(klass) #:nodoc:
-        klass.extend(Module.new {
-          def test_methods
-            ParallelEach.new super
-          end
-        })
-      end
-
       def self.forking_env?
-        !ENV["NO_FORK"] && ((RbConfig::CONFIG['host_os'] !~ /mswin|mingw/) && (RUBY_PLATFORM !~ /java/))
+        !ENV["NO_FORK"] && Process.respond_to?(:fork)
       end
 
       @@class_setup_mutex = Mutex.new
@@ -104,27 +24,24 @@ module ActiveSupport
         end
       end
 
-      def run(runner)
-        _run_class_setup
-
-        serialized = run_in_isolation do |isolated_runner|
-          super(isolated_runner)
+      def run
+        serialized = run_in_isolation do
+          super
         end
 
-        retval, proxy = Marshal.load(serialized)
-        proxy.__replay__(runner)
-        retval
+        Marshal.load(serialized)
       end
 
       module Forking
         def run_in_isolation(&blk)
           read, write = IO.pipe
+          read.binmode
+          write.binmode
 
           pid = fork do
             read.close
-            proxy = ProxyTestResult.new
-            retval = yield proxy
-            write.puts [Marshal.dump([retval, proxy])].pack("m")
+            yield
+            write.puts [Marshal.dump(self.dup)].pack("m")
             exit!
           end
 
@@ -144,22 +61,31 @@ module ActiveSupport
           require "tempfile"
 
           if ENV["ISOLATION_TEST"]
-            proxy = ProxyTestResult.new
-            retval = yield proxy
+            yield
             File.open(ENV["ISOLATION_OUTPUT"], "w") do |file|
-              file.puts [Marshal.dump([retval, proxy])].pack("m")
+              file.puts [Marshal.dump(self.dup)].pack("m")
             end
             exit!
           else
             Tempfile.open("isolation") do |tmpfile|
-              ENV["ISOLATION_TEST"]   = @method_name
-              ENV["ISOLATION_OUTPUT"] = tmpfile.path
+              env = {
+                ISOLATION_TEST: self.class.name,
+                ISOLATION_OUTPUT: tmpfile.path
+              }
 
               load_paths = $-I.map {|p| "-I\"#{File.expand_path(p)}\"" }.join(" ")
-              `#{Gem.ruby} #{load_paths} #{$0} #{ORIG_ARGV.join(" ")} -t\"#{self.class}\"`
+              orig_args = ORIG_ARGV.join(" ")
+              test_opts = "-n#{self.class.name}##{self.name}"
+              command = "#{Gem.ruby} #{load_paths} #{$0} #{orig_args} #{test_opts}"
 
-              ENV.delete("ISOLATION_TEST")
-              ENV.delete("ISOLATION_OUTPUT")
+              # IO.popen lets us pass env in a cross-platform way
+              child = IO.popen([env, command])
+
+              begin
+                Process.wait(child.pid)
+              rescue Errno::ECHILD # The child process may exit before we wait
+                nil
+              end
 
               return tmpfile.read.unpack("m")[0]
             end

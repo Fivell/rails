@@ -1,5 +1,4 @@
 require 'abstract_unit'
-# FIXME remove DummyKeyGenerator and this require in 4.1
 require 'active_support/key_generator'
 
 class FlashTest < ActionController::TestCase
@@ -175,14 +174,14 @@ class FlashTest < ActionController::TestCase
     flash.update(:foo => :foo_indeed, :bar => :bar_indeed)
 
     assert_equal(:foo_indeed, flash.discard(:foo)) # valid key passed
-    assert_nil flash.discard(:unknown) # non existant key passed
-    assert_equal({:foo => :foo_indeed, :bar => :bar_indeed}, flash.discard().to_hash) # nothing passed
-    assert_equal({:foo => :foo_indeed, :bar => :bar_indeed}, flash.discard(nil).to_hash) # nothing passed
+    assert_nil flash.discard(:unknown) # non existent key passed
+    assert_equal({"foo" => :foo_indeed, "bar" => :bar_indeed}, flash.discard().to_hash) # nothing passed
+    assert_equal({"foo" => :foo_indeed, "bar" => :bar_indeed}, flash.discard(nil).to_hash) # nothing passed
 
     assert_equal(:foo_indeed, flash.keep(:foo)) # valid key passed
-    assert_nil flash.keep(:unknown) # non existant key passed
-    assert_equal({:foo => :foo_indeed, :bar => :bar_indeed}, flash.keep().to_hash) # nothing passed
-    assert_equal({:foo => :foo_indeed, :bar => :bar_indeed}, flash.keep(nil).to_hash) # nothing passed
+    assert_nil flash.keep(:unknown) # non existent key passed
+    assert_equal({"foo" => :foo_indeed, "bar" => :bar_indeed}, flash.keep().to_hash) # nothing passed
+    assert_equal({"foo" => :foo_indeed, "bar" => :bar_indeed}, flash.keep(nil).to_hash) # nothing passed
   end
 
   def test_redirect_to_with_alert
@@ -211,15 +210,36 @@ class FlashTest < ActionController::TestCase
   end
 
   def test_redirect_to_with_adding_flash_types
-    @controller.class.add_flash_types :foo
+    original_controller = @controller
+    test_controller_with_flash_type_foo = Class.new(TestController) do
+      add_flash_types :foo
+    end
+    @controller = test_controller_with_flash_type_foo.new
     get :redirect_with_foo_flash
     assert_equal "for great justice", @controller.send(:flash)[:foo]
+  ensure
+    @controller = original_controller
+  end
+
+  def test_add_flash_type_to_subclasses
+    test_controller_with_flash_type_foo = Class.new(TestController) do
+      add_flash_types :foo
+    end
+    subclass_controller_with_no_flash_type = Class.new(test_controller_with_flash_type_foo)
+    assert subclass_controller_with_no_flash_type._flash_types.include?(:foo)
+  end
+
+  def test_does_not_add_flash_type_to_parent_class
+    Class.new(TestController) do
+      add_flash_types :bar
+    end
+    assert_not TestController._flash_types.include?(:bar)
   end
 end
 
 class FlashIntegrationTest < ActionDispatch::IntegrationTest
   SessionKey = '_myapp_session'
-  Generator  = ActiveSupport::DummyKeyGenerator.new('b3c631c314c0bbca50c1b2843150fe33')
+  Generator  = ActiveSupport::LegacyKeyGenerator.new('b3c631c314c0bbca50c1b2843150fe33')
 
   class TestController < ActionController::Base
     add_flash_types :bar
@@ -268,16 +288,16 @@ class FlashIntegrationTest < ActionDispatch::IntegrationTest
   def test_setting_flash_does_not_raise_in_following_requests
     with_test_route_set do
       env = { 'action_dispatch.request.flash_hash' => ActionDispatch::Flash::FlashHash.new }
-      get '/set_flash', nil, env
-      get '/set_flash', nil, env
+      get '/set_flash', env: env
+      get '/set_flash', env: env
     end
   end
 
   def test_setting_flash_now_does_not_raise_in_following_requests
     with_test_route_set do
       env = { 'action_dispatch.request.flash_hash' => ActionDispatch::Flash::FlashHash.new }
-      get '/set_flash_now', nil, env
-      get '/set_flash_now', nil, env
+      get '/set_flash_now', env: env
+      get '/set_flash_now', env: env
     end
   end
 
@@ -292,9 +312,11 @@ class FlashIntegrationTest < ActionDispatch::IntegrationTest
   private
 
     # Overwrite get to send SessionSecret in env hash
-    def get(path, parameters = nil, env = {})
-      env["action_dispatch.key_generator"] ||= Generator
-      super
+    def get(path, *args)
+      args[0] ||= {}
+      args[0][:env] ||= {}
+      args[0][:env]["action_dispatch.key_generator"] ||= Generator
+      super(path, *args)
     end
 
     def with_test_route_set

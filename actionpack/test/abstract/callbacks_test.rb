@@ -259,7 +259,7 @@ module AbstractController
     end
 
     class TestCallbacksWithArgs < ActiveSupport::TestCase
-      test "callbacks still work when invoking process with multiple args" do
+      test "callbacks still work when invoking process with multiple arguments" do
         controller = CallbacksWithArgs.new
         controller.process(:index, " Howdy!")
         assert_equal "Hello world Howdy!", controller.response_body
@@ -267,9 +267,11 @@ module AbstractController
     end
 
     class AliasedCallbacks < ControllerWithCallbacks
-      before_filter :first
-      after_filter :second
-      around_filter :aroundz
+      ActiveSupport::Deprecation.silence do
+        before_filter :first
+        after_filter :second
+        around_filter :aroundz
+      end
 
       def first
         @text = "Hello world"

@@ -34,6 +34,12 @@
       padding: 0.5em 1.5em;
     }
 
+    h1 {
+      margin: 0.2em 0;
+      line-height: 1.1em;
+      font-size: 2em;
+    }
+
     h2 {
       color: #C52F24;
       line-height: 25px;
@@ -110,9 +116,15 @@
       background-color: #FFCCCC;
     }
 
+    .hidden {
+      display: none;
+    }
+
     a { color: #980905; }
     a:visited { color: #666; }
+    a.trace-frames { color: #666; }
     a:hover { color: #C52F24; }
+    a.trace-frames.selected { color: #C52F24 }
 
     <%= yield :style %>
   </style>
@@ -121,6 +133,7 @@
     var toggle = function(id) {
       var s = document.getElementById(id).style;
       s.display = s.display == 'none' ? 'block' : 'none';
+      return false;
     }
     var show = function(id) {
       document.getElementById(id).style.display = 'block';
@@ -129,13 +142,13 @@
       document.getElementById(id).style.display = 'none';
     }
     var toggleTrace = function() {
-      toggle('blame_trace');
+      return toggle('blame_trace');
     }
     var toggleSessionDump = function() {
-      toggle('session_dump');
+      return toggle('session_dump');
     }
     var toggleEnvDump = function() {
-      toggle('env_dump');
+      return toggle('env_dump');
     }
   </script>
 </head>

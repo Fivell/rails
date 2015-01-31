@@ -1,11 +1,42 @@
 require 'active_support/core_ext/hash/indifferent_access'
 
 module ActiveRecord
+  # == Single table inheritance
+  #
+  # Active Record allows inheritance by storing the name of the class in a column that by
+  # default is named "type" (can be changed by overwriting <tt>Base.inheritance_column</tt>).
+  # This means that an inheritance looking like this:
+  #
+  #   class Company < ActiveRecord::Base; end
+  #   class Firm < Company; end
+  #   class Client < Company; end
+  #   class PriorityClient < Client; end
+  #
+  # When you do <tt>Firm.create(name: "37signals")</tt>, this record will be saved in
+  # the companies table with type = "Firm". You can then fetch this row again using
+  # <tt>Company.where(name: '37signals').first</tt> and it will return a Firm object.
+  #
+  # Be aware that because the type column is an attribute on the record every new
+  # subclass will instantly be marked as dirty and the type column will be included
+  # in the list of changed attributes on the record. This is different from non
+  # STI classes:
+  #
+  #   Company.new.changed? # => false
+  #   Firm.new.changed?    # => true
+  #   Firm.new.changes     # => {"type"=>["","Firm"]}
+  #
+  # If you don't have a type column defined in your table, single-table inheritance won't
+  # be triggered. In that case, it'll work just like normal subclasses with no special magic
+  # for differentiating between them or reloading the right type with find.
+  #
+  # Note, all the attributes for all the cases are kept in the same table. Read more:
+  # http://www.martinfowler.com/eaaCatalog/singleTableInheritance.html
+  #
   module Inheritance
     extend ActiveSupport::Concern
 
     included do
-      # Determine whether to store the full constant name including namespace when using STI
+      # Determines whether to store the full constant name including namespace when using STI.
       class_attribute :store_full_sti_class, instance_writer: false
       self.store_full_sti_class = true
     end
@@ -13,18 +44,26 @@ module ActiveRecord
     module ClassMethods
       # Determines if one of the attributes passed in is the inheritance column,
       # and if the inheritance column is attr accessible, it initializes an
-      # instance of the given subclass instead of the base class
+      # instance of the given subclass instead of the base class.
       def new(*args, &block)
-        if (attrs = args.first).is_a?(Hash)
-          if subclass = subclass_from_attrs(attrs)
-            return subclass.new(*args, &block)
-          end
+        if abstract_class? || self == Base
+          raise NotImplementedError, "#{self} is an abstract class and cannot be instantiated."
         end
-        # Delegate to the original .new
-        super
+
+        attrs = args.first
+        if subclass_from_attributes?(attrs)
+          subclass = subclass_from_attributes(attrs)
+        end
+
+        if subclass
+          subclass.new(*args, &block)
+        else
+          super
+        end
       end
 
-      # True if this isn't a concrete subclass needing a STI type condition.
+      # Returns +true+ if this does not need STI type condition. Returns
+      # +false+ if STI type condition needs to be applied.
       def descends_from_active_record?
         if self == Base
           false
@@ -38,14 +77,6 @@ module ActiveRecord
       def finder_needs_type_condition? #:nodoc:
         # This is like this because benchmarking justifies the strange :false stuff
         :true == (@finder_needs_type_condition ||= descends_from_active_record? ? :false : :true)
-      end
-
-      def symbolized_base_class
-        @symbolized_base_class ||= base_class.to_s.to_sym
-      end
-
-      def symbolized_sti_name
-        @symbolized_sti_name ||= sti_name.present? ? sti_name.to_sym : symbolized_base_class
       end
 
       # Returns the class descending directly from ActiveRecord::Base, or
@@ -110,16 +141,11 @@ module ActiveRecord
           candidates << type_name
 
           candidates.each do |candidate|
-            begin
-              constant = ActiveSupport::Dependencies.constantize(candidate)
-              return constant if candidate == constant.to_s
-            rescue NameError => e
-              # We don't want to swallow NoMethodError < NameError errors
-              raise e unless e.instance_of?(NameError)
-            end
+            constant = ActiveSupport::Dependencies.safe_constantize(candidate)
+            return constant if candidate == constant.to_s
           end
 
-          raise NameError, "uninitialized constant #{candidates.first}"
+          raise NameError.new("uninitialized constant #{candidates.first}", candidates.first)
         end
       end
 
@@ -155,8 +181,8 @@ module ActiveRecord
       end
 
       def type_condition(table = arel_table)
-        sti_column = table[inheritance_column.to_sym]
-        sti_names  = ([self] + descendants).map { |model| model.sti_name }
+        sti_column = table[inheritance_column]
+        sti_names  = ([self] + descendants).map(&:sti_name)
 
         sti_column.in(sti_names)
       end
@@ -165,17 +191,36 @@ module ActiveRecord
       # is not self or a valid subclass, raises ActiveRecord::SubclassNotFound
       # If this is a StrongParameters hash, and access to inheritance_column is not permitted,
       # this will ignore the inheritance column and return nil
-      def subclass_from_attrs(attrs)
+      def subclass_from_attributes?(attrs)
+        columns_hash.include?(inheritance_column) && attrs.is_a?(Hash)
+      end
+
+      def subclass_from_attributes(attrs)
         subclass_name = attrs.with_indifferent_access[inheritance_column]
-        return nil if subclass_name.blank? || subclass_name == self.name
-        unless subclass = subclasses.detect { |sub| sub.name == subclass_name }
-          raise ActiveRecord::SubclassNotFound.new("Invalid single-table inheritance type: #{subclass_name} is not a subclass of #{name}")
+
+        if subclass_name.present? && subclass_name != self.name
+          subclass = subclass_name.safe_constantize
+
+          unless descendants.include?(subclass)
+            raise ActiveRecord::SubclassNotFound.new("Invalid single-table inheritance type: #{subclass_name} is not a subclass of #{name}")
+          end
+
+          subclass
         end
-        subclass
       end
     end
 
+    def initialize_dup(other)
+      super
+      ensure_proper_type
+    end
+
     private
+
+    def initialize_internals_callback
+      super
+      ensure_proper_type
+    end
 
     # Sets the attribute used for single table inheritance to this class name if this is not the
     # ActiveRecord::Base descendant.

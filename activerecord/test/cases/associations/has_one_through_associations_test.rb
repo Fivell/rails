@@ -15,6 +15,7 @@ require 'models/essay'
 require 'models/owner'
 require 'models/post'
 require 'models/comment'
+require 'models/categorization'
 
 class HasOneThroughAssociationsTest < ActiveRecord::TestCase
   fixtures :member_types, :members, :clubs, :memberships, :sponsors, :organizations, :minivans,
@@ -43,6 +44,20 @@ class HasOneThroughAssociationsTest < ActiveRecord::TestCase
     assert_equal clubs(:moustache_club), new_member.club
     assert new_member.save
     assert_equal clubs(:moustache_club), new_member.club
+  end
+
+  def test_creating_association_sets_both_parent_ids_for_new
+    member = Member.new(name: 'Sean Griffin')
+    club = Club.new(name: 'Da Club')
+
+    member.club = club
+
+    member.save!
+
+    assert member.id
+    assert club.id
+    assert_equal member.id, member.current_membership.member_id
+    assert_equal club.id, member.current_membership.club_id
   end
 
   def test_replace_target_record
@@ -191,6 +206,7 @@ class HasOneThroughAssociationsTest < ActiveRecord::TestCase
   end
 
   def test_preloading_has_one_through_on_belongs_to
+    MemberDetail.delete_all
     assert_not_nil @member.member_type
     @organization = organizations(:nsa)
     @member_detail = MemberDetail.new
@@ -201,7 +217,7 @@ class HasOneThroughAssociationsTest < ActiveRecord::TestCase
     end
     @new_detail = @member_details[0]
     assert @new_detail.send(:association, :member_type).loaded?
-    assert_not_nil assert_no_queries { @new_detail.member_type }
+    assert_no_queries { @new_detail.member_type }
   end
 
   def test_save_of_record_with_loaded_has_one_through
@@ -274,6 +290,12 @@ class HasOneThroughAssociationsTest < ActiveRecord::TestCase
     end
   end
 
+  def test_has_one_through_polymorphic_association
+    assert_raise(ActiveRecord::HasOneAssociationPolymorphicThroughError) do
+      @member.premium_club
+    end
+  end
+
   def test_has_one_through_belongs_to_should_update_when_the_through_foreign_key_changes
     minivan = minivans(:cool_first)
 
@@ -313,5 +335,13 @@ class HasOneThroughAssociationsTest < ActiveRecord::TestCase
 
   def test_has_one_through_with_custom_select_on_join_model_default_scope
     assert_equal clubs(:boring_club), members(:groucho).selected_club
+  end
+
+  def test_has_one_through_relationship_cannot_have_a_counter_cache
+    assert_raise(ArgumentError) do
+      Class.new(ActiveRecord::Base) do
+        has_one :thing, through: :other_thing, counter_cache: true
+      end
+    end
   end
 end

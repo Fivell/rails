@@ -245,7 +245,7 @@ class NamingHelpersTest < ActiveModel::TestCase
   end
 
   def test_uncountable
-    assert uncountable?(@uncountable), "Expected 'sheep' to be uncoutable"
+    assert uncountable?(@uncountable), "Expected 'sheep' to be uncountable"
     assert !uncountable?(@klass), "Expected 'contact' to be countable"
   end
 
@@ -270,5 +270,11 @@ class NameWithAnonymousClassTest < ActiveModel::TestCase
   def test_anonymous_class_with_name_argument
     model_name = ActiveModel::Name.new(Class.new, nil, "Anonymous")
     assert_equal "Anonymous", model_name
+  end
+end
+
+class NamingMethodDelegationTest < ActiveModel::TestCase
+  def test_model_name
+    assert_equal Blog::Post.model_name, Blog::Post.new.model_name
   end
 end

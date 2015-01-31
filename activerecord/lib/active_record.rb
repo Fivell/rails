@@ -1,5 +1,5 @@
 #--
-# Copyright (c) 2004-2013 David Heinemeier Hansson
+# Copyright (c) 2004-2015 David Heinemeier Hansson
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -25,19 +25,21 @@ require 'active_support'
 require 'active_support/rails'
 require 'active_model'
 require 'arel'
-require 'active_record/deprecated_finders'
 
 require 'active_record/version'
+require 'active_record/attribute_set'
 
 module ActiveRecord
   extend ActiveSupport::Autoload
 
+  autoload :Attribute
   autoload :Base
   autoload :Callbacks
   autoload :Core
-  autoload :CounterCache
   autoload :ConnectionHandling
+  autoload :CounterCache
   autoload :DynamicMatchers
+  autoload :Enum
   autoload :Explain
   autoload :Inheritance
   autoload :Integration
@@ -45,22 +47,27 @@ module ActiveRecord
   autoload :Migrator, 'active_record/migration'
   autoload :ModelSchema
   autoload :NestedAttributes
+  autoload :NoTouching
   autoload :Persistence
   autoload :QueryCache
   autoload :Querying
   autoload :ReadonlyAttributes
   autoload :Reflection
+  autoload :RuntimeRegistry
   autoload :Sanitization
   autoload :Schema
   autoload :SchemaDumper
   autoload :SchemaMigration
   autoload :Scoping
   autoload :Serialization
+  autoload :StatementCache
   autoload :Store
+  autoload :TableMetadata
   autoload :Timestamp
   autoload :Transactions
   autoload :Translation
   autoload :Validations
+  autoload :SecureToken
 
   eager_autoload do
     autoload :ActiveRecordError, 'active_record/errors'
@@ -69,11 +76,12 @@ module ActiveRecord
 
     autoload :Aggregations
     autoload :Associations
-    autoload :AttributeMethods
     autoload :AttributeAssignment
+    autoload :AttributeMethods
     autoload :AutosaveAssociation
 
     autoload :Relation
+    autoload :AssociationRelation
     autoload :NullRelation
 
     autoload_under 'relation' do
@@ -91,6 +99,7 @@ module ActiveRecord
 
   module Coders
     autoload :YAMLColumn, 'active_record/coders/yaml_column'
+    autoload :JSON, 'active_record/coders/json'
   end
 
   module AttributeMethods
@@ -145,7 +154,6 @@ module ActiveRecord
       'active_record/tasks/postgresql_database_tasks'
   end
 
-  autoload :TestCase
   autoload :TestFixtures, 'active_record/fixtures'
 
   def self.eager_load!

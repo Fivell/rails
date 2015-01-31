@@ -31,7 +31,7 @@ class <%= controller_class_name %>Controller < ApplicationController
     if @<%= orm_instance.save %>
       redirect_to @<%= singular_table_name %>, notice: <%= "'#{human_name} was successfully created.'" %>
     else
-      render action: 'new'
+      render :new
     end
   end
 
@@ -40,14 +40,14 @@ class <%= controller_class_name %>Controller < ApplicationController
     if @<%= orm_instance.update("#{singular_table_name}_params") %>
       redirect_to @<%= singular_table_name %>, notice: <%= "'#{human_name} was successfully updated.'" %>
     else
-      render action: 'edit'
+      render :edit
     end
   end
 
   # DELETE <%= route_url %>/1
   def destroy
     @<%= orm_instance.destroy %>
-    redirect_to <%= index_helper %>_url
+    redirect_to <%= index_helper %>_url, notice: <%= "'#{human_name} was successfully destroyed.'" %>
   end
 
   private
@@ -56,12 +56,12 @@ class <%= controller_class_name %>Controller < ApplicationController
       @<%= singular_table_name %> = <%= orm_class.find(class_name, "params[:id]") %>
     end
 
-    # Never trust parameters from the scary internet, only allow the white list through.
+    # Only allow a trusted parameter "white list" through.
     def <%= "#{singular_table_name}_params" %>
       <%- if attributes_names.empty? -%>
-      params[<%= ":#{singular_table_name}" %>]
+      params[:<%= singular_table_name %>]
       <%- else -%>
-      params.require(<%= ":#{singular_table_name}" %>).permit(<%= attributes_names.map { |name| ":#{name}" }.join(', ') %>)
+      params.require(:<%= singular_table_name %>).permit(<%= attributes_names.map { |name| ":#{name}" }.join(', ') %>)
       <%- end -%>
     end
 end

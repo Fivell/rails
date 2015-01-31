@@ -32,7 +32,7 @@ module ShowExceptions
 
     test 'show diagnostics from a local ip if show_detailed_exceptions? is set to request.local?' do
       @app = ShowExceptionsController.action(:boom)
-      ['127.0.0.1', '127.0.0.127', '::1', '0:0:0:0:0:0:0:1', '0:0:0:0:0:0:0:1%0'].each do |ip_address|
+      ['127.0.0.1', '127.0.0.127', '127.12.1.1', '::1', '0:0:0:0:0:0:0:1', '0:0:0:0:0:0:0:1%0'].each do |ip_address|
         self.remote_addr = ip_address
         get '/'
         assert_match(/boom/, body)
@@ -47,7 +47,7 @@ module ShowExceptions
     end
   end
 
-  class ShowExceptionsOverridenController < ShowExceptionsController
+  class ShowExceptionsOverriddenController < ShowExceptionsController
     private
 
     def show_detailed_exceptions?
@@ -55,40 +55,40 @@ module ShowExceptions
     end
   end
 
-  class ShowExceptionsOverridenTest < ActionDispatch::IntegrationTest
+  class ShowExceptionsOverriddenTest < ActionDispatch::IntegrationTest
     test 'show error page' do
-      @app = ShowExceptionsOverridenController.action(:boom)
-      get '/', {'detailed' => '0'}
+      @app = ShowExceptionsOverriddenController.action(:boom)
+      get '/', params: { 'detailed' => '0' }
       assert_equal "500 error fixture\n", body
     end
 
     test 'show diagnostics message' do
-      @app = ShowExceptionsOverridenController.action(:boom)
-      get '/', {'detailed' => '1'}
+      @app = ShowExceptionsOverriddenController.action(:boom)
+      get '/', params: { 'detailed' => '1' }
       assert_match(/boom/, body)
     end
   end
 
   class ShowExceptionsFormatsTest < ActionDispatch::IntegrationTest
     def test_render_json_exception
-      @app = ShowExceptionsOverridenController.action(:boom)
-      get "/", {}, 'HTTP_ACCEPT' => 'application/json'
+      @app = ShowExceptionsOverriddenController.action(:boom)
+      get "/", headers: { 'HTTP_ACCEPT' => 'application/json' }
       assert_response :internal_server_error
       assert_equal 'application/json', response.content_type.to_s
-      assert_equal({ :status => '500', :error => 'boom!' }.to_json, response.body)
+      assert_equal({ :status => '500', :error => 'Internal Server Error' }.to_json, response.body)
     end
 
     def test_render_xml_exception
-      @app = ShowExceptionsOverridenController.action(:boom)
-      get "/", {}, 'HTTP_ACCEPT' => 'application/xml'
+      @app = ShowExceptionsOverriddenController.action(:boom)
+      get "/", headers: { 'HTTP_ACCEPT' => 'application/xml' }
       assert_response :internal_server_error
       assert_equal 'application/xml', response.content_type.to_s
-      assert_equal({ :status => '500', :error => 'boom!' }.to_xml, response.body)
+      assert_equal({ :status => '500', :error => 'Internal Server Error' }.to_xml, response.body)
     end
 
     def test_render_fallback_exception
-      @app = ShowExceptionsOverridenController.action(:boom)
-      get "/", {}, 'HTTP_ACCEPT' => 'text/csv'
+      @app = ShowExceptionsOverriddenController.action(:boom)
+      get "/", headers: { 'HTTP_ACCEPT' => 'text/csv' }
       assert_response :internal_server_error
       assert_equal 'text/html', response.content_type.to_s
     end
@@ -96,12 +96,12 @@ module ShowExceptions
 
   class ShowFailsafeExceptionsTest < ActionDispatch::IntegrationTest
     def test_render_failsafe_exception
-      @app = ShowExceptionsOverridenController.action(:boom)
+      @app = ShowExceptionsOverriddenController.action(:boom)
       @exceptions_app = @app.instance_variable_get(:@exceptions_app)
       @app.instance_variable_set(:@exceptions_app, nil)
       $stderr = StringIO.new
 
-      get '/', {}, 'HTTP_ACCEPT' => 'text/json'
+      get '/', headers: { 'HTTP_ACCEPT' => 'text/json' }
       assert_response :internal_server_error
       assert_equal 'text/plain', response.content_type.to_s
     ensure

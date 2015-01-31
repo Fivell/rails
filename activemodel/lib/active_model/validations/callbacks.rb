@@ -1,6 +1,6 @@
 module ActiveModel
   module Validations
-    # == Active \Model Validation Callbacks
+    # == Active \Model \Validation \Callbacks
     #
     # Provides an interface for any class to have +before_validation+ and
     # +after_validation+ callbacks.
@@ -15,14 +15,16 @@ module ActiveModel
     #     after_validation  :do_stuff_after_validation
     #   end
     #
-    # Like other <tt>before_*</tt> callbacks if +before_validation+ returns
-    # +false+ then <tt>valid?</tt> will not be called.
+    # Like other <tt>before_*</tt> callbacks if +before_validation+ throws
+    # +:abort+ then <tt>valid?</tt> will not be called.
     module Callbacks
       extend ActiveSupport::Concern
 
       included do
         include ActiveSupport::Callbacks
-        define_callbacks :validation, :terminator => "result == false", :skip_after_callbacks_if_terminated => true, :scope => [:kind, :name]
+        define_callbacks :validation,
+                         skip_after_callbacks_if_terminated: true,
+                         scope: [:kind, :name]
       end
 
       module ClassMethods
@@ -55,7 +57,9 @@ module ActiveModel
           if options.is_a?(Hash) && options[:on]
             options[:if] = Array(options[:if])
             options[:on] = Array(options[:on])
-            options[:if].unshift("#{options[:on]}.include? self.validation_context")
+            options[:if].unshift ->(o) {
+              options[:on].include? o.validation_context
+            }
           end
           set_callback(:validation, :before, *args, &block)
         end
@@ -93,7 +97,9 @@ module ActiveModel
           options[:if] = Array(options[:if])
           if options[:on]
             options[:on] = Array(options[:on])
-            options[:if].unshift("#{options[:on]}.include? self.validation_context")
+            options[:if].unshift ->(o) {
+              options[:on].include? o.validation_context
+            }
           end
           set_callback(:validation, :after, *(args << options), &block)
         end
@@ -103,7 +109,7 @@ module ActiveModel
 
       # Overwrite run validations to include callbacks.
       def run_validations! #:nodoc:
-        run_callbacks(:validation) { super }
+        _run_validation_callbacks { super }
       end
     end
   end

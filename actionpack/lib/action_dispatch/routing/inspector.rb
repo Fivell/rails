@@ -1,25 +1,19 @@
 require 'delegate'
+require 'active_support/core_ext/string/strip'
 
 module ActionDispatch
   module Routing
     class RouteWrapper < SimpleDelegator
       def endpoint
-        rack_app ? rack_app.inspect : "#{controller}##{action}"
+        app.dispatcher? ? "#{controller}##{action}" : rack_app.inspect
       end
 
       def constraints
         requirements.except(:controller, :action)
       end
 
-      def rack_app(app = self.app)
-        @rack_app ||= begin
-          class_name = app.class.name.to_s
-          if class_name == "ActionDispatch::Routing::Mapper::Constraints"
-            rack_app(app.app)
-          elsif ActionDispatch::Routing::Redirect === app || class_name !~ /^ActionDispatch::Routing/
-            app
-          end
-        end
+      def rack_app
+        app.app
       end
 
       def verb
@@ -54,7 +48,7 @@ module ActionDispatch
       def reqs
         @reqs ||= begin
           reqs = endpoint
-          reqs += " #{constraints.to_s}" unless constraints.empty?
+          reqs += " #{constraints}" unless constraints.empty?
           reqs
         end
       end
@@ -68,11 +62,11 @@ module ActionDispatch
       end
 
       def internal?
-        controller =~ %r{\Arails/(info|welcome)} || path =~ %r{\A#{Rails.application.config.assets.prefix}}
+        controller.to_s =~ %r{\Arails/(info|mailers|welcome)} || path =~ %r{\A#{Rails.application.config.assets.prefix}\z}
       end
 
       def engine?
-        rack_app && rack_app.respond_to?(:routes)
+        rack_app.respond_to?(:routes)
       end
     end
 
@@ -90,6 +84,13 @@ module ActionDispatch
         routes_to_display = filter_routes(filter)
 
         routes = collect_routes(routes_to_display)
+
+        if routes.none?
+          formatter.no_routes
+          return formatter.result
+        end
+
+        formatter.header routes
         formatter.section routes
 
         @engines.each do |name, engine_routes|
@@ -113,9 +114,7 @@ module ActionDispatch
       def collect_routes(routes)
         routes.collect do |route|
           RouteWrapper.new(route)
-        end.reject do |route|
-          route.internal?
-        end.collect do |route|
+        end.reject(&:internal?).collect do |route|
           collect_engine_routes(route)
 
           { name:   route.name,
@@ -155,15 +154,40 @@ module ActionDispatch
         @buffer << draw_section(routes)
       end
 
+      def header(routes)
+        @buffer << draw_header(routes)
+      end
+
+      def no_routes
+        @buffer << <<-MESSAGE.strip_heredoc
+          You don't have any routes defined!
+
+          Please add some routes in config/routes.rb.
+
+          For more information about routes, see the Rails guide: http://guides.rubyonrails.org/routing.html.
+          MESSAGE
+      end
+
       private
         def draw_section(routes)
-          name_width = routes.map { |r| r[:name].length }.max
-          verb_width = routes.map { |r| r[:verb].length }.max
-          path_width = routes.map { |r| r[:path].length }.max
+          header_lengths = ['Prefix', 'Verb', 'URI Pattern'].map(&:length)
+          name_width, verb_width, path_width = widths(routes).zip(header_lengths).map(&:max)
 
           routes.map do |r|
             "#{r[:name].rjust(name_width)} #{r[:verb].ljust(verb_width)} #{r[:path].ljust(path_width)} #{r[:reqs]}"
           end
+        end
+
+        def draw_header(routes)
+          name_width, verb_width, path_width = widths(routes)
+
+          "#{"Prefix".rjust(name_width)} #{"Verb".ljust(verb_width)} #{"URI Pattern".ljust(path_width)} Controller#Action"
+        end
+
+        def widths(routes)
+          [routes.map { |r| r[:name].length }.max || 0,
+           routes.map { |r| r[:verb].length }.max || 0,
+           routes.map { |r| r[:path].length }.max || 0]
         end
     end
 
@@ -179,6 +203,23 @@ module ActionDispatch
 
       def section(routes)
         @buffer << @view.render(partial: "routes/route", collection: routes)
+      end
+
+      # the header is part of the HTML page, so we don't construct it here.
+      def header(routes)
+      end
+
+      def no_routes
+        @buffer << <<-MESSAGE.strip_heredoc
+          <p>You don't have any routes defined!</p>
+          <ul>
+            <li>Please add some routes in <tt>config/routes.rb</tt>.</li>
+            <li>
+              For more information about routes, please see the Rails guide
+              <a href="http://guides.rubyonrails.org/routing.html">Rails Routing from the Outside In</a>.
+            </li>
+          </ul>
+          MESSAGE
       end
 
       def result

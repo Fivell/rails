@@ -1,12 +1,11 @@
 require 'abstract_unit'
 require 'stringio'
-# FIXME remove DummyKeyGenerator and this require in 4.1
 require 'active_support/key_generator'
 
 class CookieStoreTest < ActionDispatch::IntegrationTest
   SessionKey = '_myapp_session'
   SessionSecret = 'b3c631c314c0bbca50c1b2843150fe33'
-  Generator = ActiveSupport::DummyKeyGenerator.new(SessionSecret)
+  Generator = ActiveSupport::LegacyKeyGenerator.new(SessionSecret)
 
   Verifier = ActiveSupport::MessageVerifier.new(SessionSecret, :digest => 'SHA1')
   SignedBar = Verifier.generate(:foo => "bar", :session_id => SecureRandom.hex(16))
@@ -87,7 +86,7 @@ class CookieStoreTest < ActionDispatch::IntegrationTest
       cookies[SessionKey] = SignedBar
       get '/persistent_session_id'
       assert_response :success
-      assert_equal response.body.size, 32
+      assert_equal 32, response.body.size
       session_id = response.body
 
       get '/get_session_id'
@@ -126,7 +125,7 @@ class CookieStoreTest < ActionDispatch::IntegrationTest
 
   def test_does_set_secure_cookies_over_https
     with_test_route_set(:secure => true) do
-      get '/set_session_value', nil, 'HTTPS' => 'on'
+      get '/set_session_value', headers: { 'HTTPS' => 'on' }
       assert_response :success
       assert_equal "_myapp_session=#{response.body}; path=/; secure; HttpOnly",
         headers['Set-Cookie']
@@ -248,7 +247,7 @@ class CookieStoreTest < ActionDispatch::IntegrationTest
       cookies[SessionKey] = SignedBar
       get '/persistent_session_id'
       assert_response :success
-      assert_equal response.body.size, 32
+      assert_equal 32, response.body.size
       session_id = response.body
       get '/persistent_session_id'
       assert_equal session_id, response.body
@@ -264,7 +263,7 @@ class CookieStoreTest < ActionDispatch::IntegrationTest
 
       get "/get_session_id"
       sid = response.body
-      assert_equal sid.size, 36
+      assert_equal 36, sid.size
 
       get "/change_session_id"
       assert_not_equal sid, response.body
@@ -332,9 +331,11 @@ class CookieStoreTest < ActionDispatch::IntegrationTest
   private
 
     # Overwrite get to send SessionSecret in env hash
-    def get(path, parameters = nil, env = {})
-      env["action_dispatch.key_generator"] ||= Generator
-      super
+    def get(path, *args)
+      args[0] ||= {}
+      args[0][:headers] ||= {}
+      args[0][:headers]["action_dispatch.key_generator"] ||= Generator
+      super(path, *args)
     end
 
     def with_test_route_set(options = {})

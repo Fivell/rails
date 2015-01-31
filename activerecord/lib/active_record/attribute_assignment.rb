@@ -1,51 +1,32 @@
+require 'active_model/forbidden_attributes_protection'
 
 module ActiveRecord
   module AttributeAssignment
     extend ActiveSupport::Concern
-    include ActiveModel::DeprecatedMassAssignmentSecurity
-    include ActiveModel::ForbiddenAttributesProtection
+    include ActiveModel::AttributeAssignment
 
-    # Allows you to set all the attributes by passing in a hash of attributes with
-    # keys matching the attribute names (which again matches the column names).
-    #
-    # If the passed hash responds to <tt>permitted?</tt> method and the return value
-    # of this method is +false+ an <tt>ActiveModel::ForbiddenAttributesError</tt>
-    # exception is raised.
-    def assign_attributes(new_attributes)
-      return if new_attributes.blank?
-
-      attributes                  = new_attributes.stringify_keys
-      multi_parameter_attributes  = []
-      nested_parameter_attributes = []
-
-      attributes = sanitize_for_mass_assignment(attributes)
-
-      attributes.each do |k, v|
-        if k.include?("(")
-          multi_parameter_attributes << [ k, v ]
-        elsif v.is_a?(Hash)
-          nested_parameter_attributes << [ k, v ]
-        else
-          _assign_attribute(k, v)
-        end
-      end
-
-      assign_nested_parameter_attributes(nested_parameter_attributes) unless nested_parameter_attributes.empty?
-      assign_multiparameter_attributes(multi_parameter_attributes) unless multi_parameter_attributes.empty?
+    # Alias for `assign_attributes`. See +ActiveModel::AttributeAssignment+.
+    def attributes=(attributes)
+      assign_attributes(attributes)
     end
-
-    alias attributes= assign_attributes
 
     private
 
-    def _assign_attribute(k, v)
-      public_send("#{k}=", v)
-    rescue NoMethodError
-      if respond_to?("#{k}=")
-        raise
-      else
-        raise UnknownAttributeError, "unknown attribute: #{k}"
+    def _assign_attributes(attributes) # :nodoc:
+      multi_parameter_attributes  = {}
+      nested_parameter_attributes = {}
+
+      attributes.each do |k, v|
+        if k.include?("(")
+          multi_parameter_attributes[k] = attributes.delete(k)
+        elsif v.is_a?(Hash)
+          nested_parameter_attributes[k] = attributes.delete(k)
+        end
       end
+      super(attributes)
+
+      assign_nested_parameter_attributes(nested_parameter_attributes) unless nested_parameter_attributes.empty?
+      assign_multiparameter_attributes(multi_parameter_attributes) unless multi_parameter_attributes.empty?
     end
 
     # Assign any deferred nested attributes after the base attributes have been set.
@@ -75,13 +56,13 @@ module ActiveRecord
         end
       end
       unless errors.empty?
-        error_descriptions = errors.map { |ex| ex.message }.join(",")
+        error_descriptions = errors.map(&:message).join(",")
         raise MultiparameterAssignmentErrors.new(errors), "#{errors.size} error(s) on assignment of multiparameter attributes [#{error_descriptions}]"
       end
     end
 
     def extract_callstack_for_multiparameter_attributes(pairs)
-      attributes = { }
+      attributes = {}
 
       pairs.each do |(multiparameter_name, value)|
         attribute_name = multiparameter_name.split("(").first
@@ -103,7 +84,7 @@ module ActiveRecord
     end
 
     class MultiparameterAttribute #:nodoc:
-      attr_reader :object, :name, :values, :column
+      attr_reader :object, :name, :values, :cast_type
 
       def initialize(object, name, values)
         @object = object
@@ -114,22 +95,22 @@ module ActiveRecord
       def read_value
         return if values.values.compact.empty?
 
-        @column = object.class.reflect_on_aggregation(name.to_sym) || object.column_for_attribute(name)
-        klass   = column.klass
+        @cast_type = object.type_for_attribute(name)
+        klass = cast_type.klass
 
         if klass == Time
           read_time
         elsif klass == Date
           read_date
         else
-          read_other(klass)
+          read_other
         end
       end
 
       private
 
       def instantiate_time_object(set_values)
-        if object.class.send(:create_time_zone_conversion_attribute?, name, column)
+        if object.class.send(:create_time_zone_conversion_attribute?, name, cast_type)
           Time.zone.local(*set_values)
         else
           Time.send(object.class.default_timezone, *set_values)
@@ -137,16 +118,16 @@ module ActiveRecord
       end
 
       def read_time
-        # If column is a :time (and not :date or :timestamp) there is no need to validate if
+        # If column is a :time (and not :date or :datetime) there is no need to validate if
         # there are year/month/day fields
-        if column.type == :time
+        if cast_type.type == :time
           # if the column is a time set the values to their defaults as January 1, 1970, but only if they're nil
           { 1 => 1970, 2 => 1, 3 => 1 }.each do |key,value|
             values[key] ||= value
           end
         else
           # else column is a timestamp, so if Date bits were not provided, error
-          validate_missing_parameters!([1,2,3])
+          validate_required_parameters!([1,2,3])
 
           # If Date bits were provided but blank, then return nil
           return if blank_date_parameter?
@@ -169,17 +150,16 @@ module ActiveRecord
         end
       end
 
-      def read_other(klass)
+      def read_other
         max_position = extract_max_param
         positions    = (1..max_position)
-        validate_missing_parameters!(positions)
+        validate_required_parameters!(positions)
 
-        set_values = values.values_at(*positions)
-        klass.new(*set_values)
+        values.slice(*positions)
       end
 
       # Checks whether some blank date parameter exists. Note that this is different
-      # than the validate_missing_parameters! method, since it just checks for blank
+      # than the validate_required_parameters! method, since it just checks for blank
       # positions instead of missing ones, and does not raise in case one blank position
       # exists. The caller is responsible to handle the case of this returning true.
       def blank_date_parameter?
@@ -187,7 +167,7 @@ module ActiveRecord
       end
 
       # If some position is not provided, it errors out a missing parameter exception.
-      def validate_missing_parameters!(positions)
+      def validate_required_parameters!(positions)
         if missing_parameter = positions.detect { |position| !values.key?(position) }
           raise ArgumentError.new("Missing Parameter - #{name}(#{missing_parameter})")
         end

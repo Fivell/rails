@@ -14,6 +14,7 @@ class Admin::User < ActiveRecord::Base
   end
 
   belongs_to :account
+  store :params, accessors: [ :token ], coder: YAML
   store :settings, :accessors => [ :color, :homepage ]
   store_accessor :settings, :favorite_food
   store :preferences, :accessors => [ :remember_login ]
@@ -26,5 +27,14 @@ class Admin::User < ActiveRecord::Base
 
   def phone_number=(value)
     write_store_attribute(:settings, :phone_number, value && value.gsub(/[^\d]/,''))
+  end
+
+  def color
+    super || 'red'
+  end
+
+  def color=(value)
+    value = 'blue' unless %w(black red green blue).include?(value)
+    super
   end
 end

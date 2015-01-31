@@ -2,7 +2,7 @@ require "cases/helper"
 
 class Group < ActiveRecord::Base
   Group.table_name = 'group'
-  belongs_to :select, :class_name => 'Select'
+  belongs_to :select
   has_one :values
 end
 
@@ -37,7 +37,7 @@ class MysqlReservedWordTest < ActiveRecord::TestCase
       'distinct_select'=>'distinct_id int, select_id int'
   end
 
-  def teardown
+  teardown do
     drop_tables_directly ['group', 'select', 'values', 'distinct', 'distinct_select', 'order']
   end
 
@@ -61,11 +61,6 @@ class MysqlReservedWordTest < ActiveRecord::TestCase
     #the quoting here will reveal any double quoting issues in change_column's interaction with the column method in the adapter
     assert_nothing_raised { @connection.change_column('group', 'order', :Int, :default => 0) }
     assert_nothing_raised { @connection.rename_column(:group, :order, :values) }
-  end
-
-  # dump structure of table with reserved word name
-  def test_structure_dump
-    assert_nothing_raised { @connection.structure_dump  }
   end
 
   # introspect table with reserved word name
@@ -106,7 +101,7 @@ class MysqlReservedWordTest < ActiveRecord::TestCase
     gs = nil
     assert_nothing_raised { gs = Select.find(2).groups }
     assert_equal gs.length, 2
-    assert(gs.collect{|x| x.id}.sort == [2, 3])
+    assert(gs.collect(&:id).sort == [2, 3])
   end
 
   # has_and_belongs_to_many with reserved-word table name
@@ -115,7 +110,7 @@ class MysqlReservedWordTest < ActiveRecord::TestCase
     s = nil
     assert_nothing_raised { s = Distinct.find(1).selects }
     assert_equal s.length, 2
-    assert(s.collect{|x|x.id}.sort == [1, 2])
+    assert(s.collect(&:id).sort == [1, 2])
   end
 
   # activerecord model introspection with reserved-word table and column names

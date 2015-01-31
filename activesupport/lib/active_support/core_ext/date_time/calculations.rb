@@ -1,14 +1,7 @@
-require 'active_support/deprecation'
+require 'date'
 
 class DateTime
   class << self
-    # *DEPRECATED*: Use +DateTime.civil_from_format+ directly.
-    def local_offset
-      ActiveSupport::Deprecation.warn 'DateTime.local_offset is deprecated. Use DateTime.civil_from_format directly.'
-
-      ::Time.local(2012).utc_offset.to_r / 86400
-    end
-
     # Returns <tt>Time.zone.now.to_datetime</tt> when <tt>Time.zone</tt> or
     # <tt>config.time_zone</tt> are set, otherwise returns
     # <tt>Time.now.to_datetime</tt>.
@@ -17,17 +10,11 @@ class DateTime
     end
   end
 
-  # Tells whether the DateTime object's datetime lies in the past.
-  def past?
-    self < ::DateTime.current
-  end
-
-  # Tells whether the DateTime object's datetime lies in the future.
-  def future?
-    self > ::DateTime.current
-  end
-
-  # Seconds since midnight: DateTime.now.seconds_since_midnight.
+  # Returns the number of seconds since 00:00:00.
+  #
+  #   DateTime.new(2012, 8, 29,  0,  0,  0).seconds_since_midnight # => 0
+  #   DateTime.new(2012, 8, 29, 12, 34, 56).seconds_since_midnight # => 45296
+  #   DateTime.new(2012, 8, 29, 23, 59, 59).seconds_since_midnight # => 86399
   def seconds_since_midnight
     sec + (min * 60) + (hour * 3600)
   end
@@ -59,7 +46,7 @@ class DateTime
       options.fetch(:day, day),
       options.fetch(:hour, hour),
       options.fetch(:min, options[:hour] ? 0 : min),
-      options.fetch(:sec, (options[:hour] || options[:min]) ? 0 : sec),
+      options.fetch(:sec, (options[:hour] || options[:min]) ? 0 : sec + sec_fraction),
       options.fetch(:offset, offset),
       options.fetch(:start, start)
     )
@@ -70,6 +57,16 @@ class DateTime
   # <tt>:months</tt>, <tt>:weeks</tt>, <tt>:days</tt>, <tt>:hours</tt>,
   # <tt>:minutes</tt>, <tt>:seconds</tt>.
   def advance(options)
+    unless options[:weeks].nil?
+      options[:weeks], partial_weeks = options[:weeks].divmod(1)
+      options[:days] = options.fetch(:days, 0) + 7 * partial_weeks
+    end
+
+    unless options[:days].nil?
+      options[:days], partial_days = options[:days].divmod(1)
+      options[:hours] = options.fetch(:hours, 0) + 24 * partial_days
+    end
+
     d = to_date.advance(options)
     datetime_advanced_by_date = change(:year => d.year, :month => d.month, :day => d.day)
     seconds_to_advance = \
@@ -80,7 +77,7 @@ class DateTime
     if seconds_to_advance.zero?
       datetime_advanced_by_date
     else
-      datetime_advanced_by_date.since seconds_to_advance
+      datetime_advanced_by_date.since(seconds_to_advance)
     end
   end
 
@@ -106,6 +103,16 @@ class DateTime
   alias :at_midnight :beginning_of_day
   alias :at_beginning_of_day :beginning_of_day
 
+  # Returns a new DateTime representing the middle of the day (12:00)
+  def middle_of_day
+    change(:hour => 12)
+  end
+  alias :midday :middle_of_day
+  alias :noon :middle_of_day
+  alias :at_midday :middle_of_day
+  alias :at_noon :middle_of_day
+  alias :at_middle_of_day :middle_of_day
+
   # Returns a new DateTime representing the end of the day (23:59:59).
   def end_of_day
     change(:hour => 23, :min => 59, :sec => 59)
@@ -123,6 +130,18 @@ class DateTime
     change(:min => 59, :sec => 59)
   end
   alias :at_end_of_hour :end_of_hour
+
+  # Returns a new DateTime representing the start of the minute (hh:mm:00).
+  def beginning_of_minute
+    change(:sec => 0)
+  end
+  alias :at_beginning_of_minute :beginning_of_minute
+
+  # Returns a new DateTime representing the end of the minute (hh:mm:59).
+  def end_of_minute
+    change(:sec => 59)
+  end
+  alias :at_end_of_minute :end_of_minute
 
   # Adjusts DateTime to UTC by adding its offset value; offset is set to 0.
   #
@@ -142,4 +161,17 @@ class DateTime
   def utc_offset
     (offset * 86400).to_i
   end
+
+  # Layers additional behavior on DateTime#<=> so that Time and
+  # ActiveSupport::TimeWithZone instances can be compared with a DateTime.
+  def <=>(other)
+    if other.kind_of?(Infinity)
+      super
+    elsif other.respond_to? :to_datetime
+      super other.to_datetime
+    else
+      nil
+    end
+  end
+
 end

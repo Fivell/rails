@@ -5,13 +5,13 @@ module Rails
     # paths by a Hash like API. It requires you to give a physical path on initialization.
     #
     #   root = Root.new "/rails"
-    #   root.add "app/controllers", autoload: true
+    #   root.add "app/controllers", eager_load: true
     #
     # The command above creates a new root object and add "app/controllers" as a path.
     # This means we can get a <tt>Rails::Paths::Path</tt> object back like below:
     #
     #   path = root["app/controllers"]
-    #   path.autoload?                 # => true
+    #   path.eager_load?               # => true
     #   path.is_a?(Rails::Paths::Path) # => true
     #
     # The +Path+ object is simply an enumerable and allows you to easily add extra paths:
@@ -24,13 +24,13 @@ module Rails
     #
     # Notice that when you add a path using +add+, the path object created already
     # contains the path with the same path value given to +add+. In some situations,
-    # you may not want this behavior, so you can give :with as option.
+    # you may not want this behavior, so you can give <tt>:with</tt> as option.
     #
     #   root.add "config/routes", with: "config/routes.rb"
     #   root["config/routes"].inspect # => ["config/routes.rb"]
     #
     # The +add+ method accepts the following options as arguments:
-    # autoload, autoload_once and glob.
+    # eager_load, autoload, autoload_once and glob.
     #
     # Finally, the +Path+ object also provides a few helpers:
     #
@@ -77,39 +77,32 @@ module Rails
       end
 
       def all_paths
-        values.tap { |v| v.uniq! }
+        values.tap(&:uniq!)
       end
 
       def autoload_once
-        filter_by(:autoload_once?)
+        filter_by(&:autoload_once?)
       end
 
       def eager_load
-        ActiveSupport::Deprecation.warn "eager_load is deprecated and all autoload_paths are now eagerly loaded."
-        filter_by(:autoload?)
+        filter_by(&:eager_load?)
       end
 
       def autoload_paths
-        filter_by(:autoload?)
+        filter_by(&:autoload?)
       end
 
       def load_paths
-        filter_by(:load_path?)
+        filter_by(&:load_path?)
       end
 
-    protected
+    private
 
-      def filter_by(constraint)
-        all = []
-        all_paths.each do |path|
-          if path.send(constraint)
-            paths  = path.existent
-            paths -= path.children.map { |p| p.send(constraint) ? [] : p.existent }.flatten
-            all.concat(paths)
-          end
-        end
-        all.uniq!
-        all
+      def filter_by(&block)
+        all_paths.find_all(&block).flat_map { |path|
+          paths = path.existent
+          paths - path.children.flat_map { |p| yield(p) ? [] : p.existent }
+        }.uniq
       end
     end
 
@@ -125,18 +118,15 @@ module Rails
         @glob     = options[:glob]
 
         options[:autoload_once] ? autoload_once! : skip_autoload_once!
+        options[:eager_load]    ? eager_load!    : skip_eager_load!
         options[:autoload]      ? autoload!      : skip_autoload!
         options[:load_path]     ? load_path!     : skip_load_path!
-
-        if !options.key?(:autoload) && options.key?(:eager_load)
-          ActiveSupport::Deprecation.warn "the :eager_load option is deprecated and all :autoload paths are now eagerly loaded."
-          options[:eager_load] ? autoload! : skip_autoload!
-        end
       end
 
       def children
-        keys = @root.keys.select { |k| k.include?(@current) }
-        keys.delete(@current)
+        keys = @root.keys.find_all { |k|
+          k.start_with?(@current) && k != @current
+        }
         @root.values_at(*keys.sort)
       end
 
@@ -148,35 +138,20 @@ module Rails
         expanded.last
       end
 
-      %w(autoload_once autoload load_path).each do |m|
+      %w(autoload_once eager_load autoload load_path).each do |m|
         class_eval <<-RUBY, __FILE__, __LINE__ + 1
-          def #{m}!        # def autoload!
-            @#{m} = true   #   @autoload = true
+          def #{m}!        # def eager_load!
+            @#{m} = true   #   @eager_load = true
           end              # end
                            #
-          def skip_#{m}!   # def skip_autoload!
-            @#{m} = false  #   @autoload = false
+          def skip_#{m}!   # def skip_eager_load!
+            @#{m} = false  #   @eager_load = false
           end              # end
                            #
-          def #{m}?        # def autoload?
-            @#{m}          #   @autoload
+          def #{m}?        # def eager_load?
+            @#{m}          #   @eager_load
           end              # end
         RUBY
-      end
-
-      def eager_load!
-        ActiveSupport::Deprecation.warn "eager_load paths are deprecated and all autoload paths are now eagerly loaded."
-        autoload!
-      end
-
-      def skip_eager_load!
-        ActiveSupport::Deprecation.warn "eager_load paths are deprecated and all autoload paths are now eagerly loaded."
-        skip_autoload!
-      end
-
-      def eager_load?
-        ActiveSupport::Deprecation.warn "eager_load paths are deprecated and all autoload paths are now eagerly loaded."
-        autoload?
       end
 
       def each(&block)
@@ -192,8 +167,8 @@ module Rails
         @paths.concat paths
       end
 
-      def unshift(path)
-        @paths.unshift path
+      def unshift(*paths)
+        @paths.unshift(*paths)
       end
 
       def to_ary
@@ -223,7 +198,7 @@ module Rails
 
       # Returns all expanded paths but only if they exist in the filesystem.
       def existent
-        expanded.select { |f| File.exists?(f) }
+        expanded.select { |f| File.exist?(f) }
       end
 
       def existent_directories

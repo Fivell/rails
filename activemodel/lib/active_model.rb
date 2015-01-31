@@ -1,5 +1,5 @@
 #--
-# Copyright (c) 2004-2013 David Heinemeier Hansson
+# Copyright (c) 2004-2015 David Heinemeier Hansson
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -28,6 +28,7 @@ require 'active_model/version'
 module ActiveModel
   extend ActiveSupport::Autoload
 
+  autoload :AttributeAssignment
   autoload :AttributeMethods
   autoload :BlockValidator, 'active_model/validator'
   autoload :Callbacks
@@ -37,7 +38,6 @@ module ActiveModel
   autoload :ForbiddenAttributesProtection
   autoload :Lint
   autoload :Model
-  autoload :DeprecatedMassAssignmentSecurity
   autoload :Name, 'active_model/naming'
   autoload :Naming
   autoload :SecurePassword
@@ -49,6 +49,7 @@ module ActiveModel
 
   eager_autoload do
     autoload :Errors
+    autoload :StrictValidationFailed, 'active_model/errors'
   end
 
   module Serializers
@@ -60,9 +61,9 @@ module ActiveModel
     end
   end
 
-  def eager_load!
+  def self.eager_load!
     super
-    ActiveModel::Serializer.eager_load!
+    ActiveModel::Serializers.eager_load!
   end
 end
 

@@ -1,3 +1,5 @@
+**DO NOT READ THIS FILE ON GITHUB, GUIDES ARE PUBLISHED ON http://guides.rubyonrails.org.**
+
 Working with JavaScript in Rails
 ================================
 
@@ -111,7 +113,9 @@ paintIt = (element, backgroundColor, textColor) ->
     element.style.color = textColor
 
 $ ->
-  $("a[data-color]").click ->
+  $("a[data-background-color]").click (e) ->
+    e.preventDefault()
+
     backgroundColor = $(this).data("background-color")
     textColor = $(this).data("text-color")
     paintIt(this, backgroundColor, textColor)
@@ -156,7 +160,7 @@ is a helper that assists with writing forms. `form_for` takes a `:remote`
 option. It works like this:
 
 ```erb
-<%= form_for(@post, remote: true) do |f| %>
+<%= form_for(@article, remote: true) do |f| %>
   ...
 <% end %>
 ```
@@ -164,12 +168,12 @@ option. It works like this:
 This will generate the following HTML:
 
 ```html
-<form accept-charset="UTF-8" action="/posts" class="new_post" data-remote="true" id="new_post" method="post">
+<form accept-charset="UTF-8" action="/articles" class="new_article" data-remote="true" id="new_article" method="post">
   ...
 </form>
 ```
 
-Note the `data-remote='true'`. Now, the form will be submitted by Ajax rather
+Note the `data-remote="true"`. Now, the form will be submitted by Ajax rather
 than by the browser's normal submit mechanism.
 
 You probably don't want to just sit there with a filled out `<form>`, though.
@@ -178,14 +182,14 @@ bind to the `ajax:success` event. On failure, use `ajax:error`. Check it out:
 
 ```coffeescript
 $(document).ready ->
-  $("#new_post").on("ajax:success", (e, data, status, xhr) ->
-    $("#new_post").append xhr.responseText
-  ).bind "ajax:error", (e, xhr, status, error) ->
-    $("#new_post").append "<p>ERROR</p>"
+  $("#new_article").on("ajax:success", (e, data, status, xhr) ->
+    $("#new_article").append xhr.responseText
+  ).on "ajax:error", (e, xhr, status, error) ->
+    $("#new_article").append "<p>ERROR</p>"
 ```
 
 Obviously, you'll want to be a bit more sophisticated than that, but it's a
-start.
+start. You can see more about the events [in the jquery-ujs wiki](https://github.com/rails/jquery-ujs/wiki/ajax).
 
 ### form_tag
 
@@ -194,7 +198,17 @@ is very similar to `form_for`. It has a `:remote` option that you can use like
 this:
 
 ```erb
-<%= form_tag('/posts', remote: true) %>
+<%= form_tag('/articles', remote: true) do %>
+  ...
+<% end %>
+```
+
+This will generate the following HTML:
+
+```html
+<form accept-charset="UTF-8" action="/articles" data-remote="true" method="post">
+  ...
+</form>
 ```
 
 Everything else is the same as `form_for`. See its documentation for full
@@ -207,21 +221,21 @@ is a helper that assists with generating links. It has a `:remote` option you
 can use like this:
 
 ```erb
-<%= link_to "a post", @post, remote: true %>
+<%= link_to "an article", @article, remote: true %>
 ```
 
 which generates
 
 ```html
-<a href="/posts/1" data-remote="true">a post</a>
+<a href="/articles/1" data-remote="true">an article</a>
 ```
 
 You can bind to the same Ajax events as `form_for`. Here's an example. Let's
-assume that we have a list of posts that can be deleted with just one
+assume that we have a list of articles that can be deleted with just one
 click. We would generate some HTML like this:
 
 ```erb
-<%= link_to "Delete post", @post, remote: true, method: :delete %>
+<%= link_to "Delete article", @article, remote: true, method: :delete %>
 ```
 
 and write some CoffeeScript like this:
@@ -229,7 +243,7 @@ and write some CoffeeScript like this:
 ```coffeescript
 $ ->
   $("a[data-remote]").on "ajax:success", (e, data, status, xhr) ->
-    alert "The post was deleted."
+    alert "The article was deleted."
 ```
 
 ### button_to
@@ -237,14 +251,14 @@ $ ->
 [`button_to`](http://api.rubyonrails.org/classes/ActionView/Helpers/UrlHelper.html#method-i-button_to) is a helper that helps you create buttons. It has a `:remote` option that you can call like this:
 
 ```erb
-<%= button_to "A post", @post, remote: true %>
+<%= button_to "An article", @article, remote: true %>
 ```
 
 this generates
 
 ```html
-<form action="/posts/1" class="button_to" data-remote="true" method="post">
-  <div><input type="submit" value="A post"></div>
+<form action="/articles/1" class="button_to" data-remote="true" method="post">
+  <div><input type="submit" value="An article"></div>
 </form>
 ```
 
@@ -278,9 +292,7 @@ The index view (`app/views/users/index.html.erb`) contains:
 <b>Users</b>
 
 <ul id="users">
-<% @users.each do |user| %>
-  <%= render user %>
-<% end %>
+<%= render @users %>
 </ul>
 
 <br>
@@ -301,10 +313,10 @@ The `app/views/users/_user.html.erb` partial contains the following:
 The top portion of the index page displays the users. The bottom portion
 provides a form to create a new user.
 
-The bottom form will call the create action on the Users controller. Because
+The bottom form will call the `create` action on the `UsersController`. Because
 the form's remote option is set to true, the request will be posted to the
-users controller as an Ajax request, looking for JavaScript. In order to
-service that request, the create action of your controller would look like
+`UsersController` as an Ajax request, looking for JavaScript. In order to
+serve that request, the `create` action of your controller would look like
 this:
 
 ```ruby
@@ -394,3 +406,4 @@ Here are some helpful links to help you learn even more:
 * [jquery-ujs list of external articles](https://github.com/rails/jquery-ujs/wiki/External-articles)
 * [Rails 3 Remote Links and Forms: A Definitive Guide](http://www.alfajango.com/blog/rails-3-remote-links-and-forms/)
 * [Railscasts: Unobtrusive JavaScript](http://railscasts.com/episodes/205-unobtrusive-javascript)
+* [Railscasts: Turbolinks](http://railscasts.com/episodes/390-turbolinks)

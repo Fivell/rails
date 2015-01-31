@@ -1,3 +1,5 @@
+**DO NOT READ THIS FILE ON GITHUB, GUIDES ARE PUBLISHED ON http://guides.rubyonrails.org.**
+
 Ruby on Rails 3.1 Release Notes
 ===============================
 
@@ -8,7 +10,10 @@ Highlights in Rails 3.1:
 * Assets Pipeline
 * jQuery as the default JavaScript library
 
-This release notes cover the major changes, but don't include every little bug fix and change. If you want to see everything, check out the [list of commits](https://github.com/rails/rails/commits/master) in the main Rails repository on GitHub.
+These release notes cover only the major changes. To learn about various bug
+fixes and changes, please refer to the change logs or check out the [list of
+commits](https://github.com/rails/rails/commits/3-1-stable) in the main Rails
+repository on GitHub.
 
 --------------------------------------------------------------------------------
 
@@ -137,7 +142,7 @@ Creating a Rails 3.1 application
 --------------------------------
 
 ```bash
-# You should have the 'rails' rubygem installed
+# You should have the 'rails' RubyGem installed
 $ rails new myapp
 $ cd myapp
 ```
@@ -173,7 +178,7 @@ The assets pipeline is powered by [Sprockets](https://github.com/sstephenson/spr
 
 ### HTTP Streaming
 
-HTTP Streaming is another change that is new in Rails 3.1. This lets the browser download your stylesheets and JavaScript files while the server is still generating the response. This requires Ruby 1.9.2, is opt-in and requires support from the web server as well, but the popular combo of nginx and unicorn is ready to take advantage of it.
+HTTP Streaming is another change that is new in Rails 3.1. This lets the browser download your stylesheets and JavaScript files while the server is still generating the response. This requires Ruby 1.9.2, is opt-in and requires support from the web server as well, but the popular combo of NGINX and Unicorn is ready to take advantage of it.
 
 ### Default JS library is now jQuery
 
@@ -286,7 +291,7 @@ Action Pack
     end
     ```
 
-    You can restrict it to some actions by using `:only` or `:except`. Please read the docs at [`ActionController::Streaming`](http://api.rubyonrails.org/classes/ActionController/Streaming.html) for more information.
+    You can restrict it to some actions by using `:only` or `:except`. Please read the docs at [`ActionController::Streaming`](http://api.rubyonrails.org/v3.1.0/classes/ActionController/Streaming.html) for more information.
 
 * The redirect route method now also accepts a hash of options which will only change the parts of the url in question, or an object which responds to call, allowing for redirects to be reused.
 

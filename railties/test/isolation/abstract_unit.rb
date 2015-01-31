@@ -9,6 +9,7 @@
 require 'fileutils'
 
 require 'bundler/setup' unless defined?(Bundler)
+require 'active_support'
 require 'active_support/testing/autorun'
 require 'active_support/test_case'
 
@@ -68,7 +69,8 @@ module TestHelpers
 
     def assert_welcome(resp)
       assert_equal 200, resp[0]
-      assert resp[1]["Content-Type"] = "text/html"
+      assert_match 'text/html', resp[1]["Content-Type"]
+      assert_match 'charset=utf-8', resp[1]["Content-Type"]
       assert extract_body(resp).match(/Welcome aboard/)
     end
 
@@ -93,7 +95,8 @@ module TestHelpers
     # Build an application by invoking the generator and going through the whole stack.
     def build_app(options = {})
       @prev_rails_env = ENV['RAILS_ENV']
-      ENV['RAILS_ENV'] = 'development'
+      ENV['RAILS_ENV']       =   "development"
+      ENV['SECRET_KEY_BASE'] ||= SecureRandom.hex(16)
 
       FileUtils.rm_rf(app_path)
       FileUtils.cp_r(app_template_path, app_path)
@@ -117,12 +120,31 @@ module TestHelpers
         end
       end
 
+      File.open("#{app_path}/config/database.yml", "w") do |f|
+        f.puts <<-YAML
+        default: &default
+          adapter: sqlite3
+          pool: 5
+          timeout: 5000
+        development:
+          <<: *default
+          database: db/development.sqlite3
+        test:
+          <<: *default
+          database: db/test.sqlite3
+        production:
+          <<: *default
+          database: db/production.sqlite3
+        YAML
+      end
+
       add_to_config <<-RUBY
         config.eager_load = false
-        config.secret_key_base = "3b7cd727ee24e8444053437c36cc66c4"
         config.session_store :cookie_store, key: "_myapp_session"
         config.active_support.deprecation = :log
+        config.active_support.test_order = :random
         config.action_controller.allow_forgery_protection = false
+        config.log_level = :info
       RUBY
     end
 
@@ -135,12 +157,15 @@ module TestHelpers
     def make_basic_app
       require "rails"
       require "action_controller/railtie"
+      require "action_view/railtie"
 
       app = Class.new(Rails::Application)
       app.config.eager_load = false
-      app.config.secret_key_base = "3b7cd727ee24e8444053437c36cc66c4"
+      app.secrets.secret_key_base = "3b7cd727ee24e8444053437c36cc66c4"
       app.config.session_store :cookie_store, key: "_myapp_session"
       app.config.active_support.deprecation = :log
+      app.config.active_support.test_order = :random
+      app.config.log_level = :info
 
       yield app if block_given?
       app.initialize!
@@ -163,7 +188,7 @@ module TestHelpers
       RUBY
 
       app_file 'config/routes.rb', <<-RUBY
-        AppTemplate::Application.routes.draw do
+        Rails.application.routes.draw do
           get ':controller(/:action)'
         end
       RUBY
@@ -210,6 +235,15 @@ module TestHelpers
       end
     end
 
+    def add_to_top_of_config(str)
+      environment = File.read("#{app_path}/config/application.rb")
+      if environment =~ /(Rails::Application\s*)/
+        File.open("#{app_path}/config/application.rb", 'w') do |f|
+          f.puts $` + $1 + "\n#{str}\n" + $'
+        end
+      end
+    end
+
     def add_to_config(str)
       environment = File.read("#{app_path}/config/application.rb")
       if environment =~ /(\n\s*end\s*end\s*)\Z/
@@ -242,6 +276,12 @@ module TestHelpers
       end
     end
 
+    def gsub_app_file(path, regexp, *args, &block)
+      path = "#{app_path}/#{path}"
+      content = File.read(path).gsub(regexp, *args, &block)
+      File.open(path, 'wb') { |f| f.write(content) }
+    end
+
     def remove_file(path)
       FileUtils.rm_rf "#{app_path}/#{path}"
     end
@@ -251,8 +291,12 @@ module TestHelpers
     end
 
     def use_frameworks(arr)
-      to_remove =  [:actionmailer,
-                    :activerecord] - arr
+      to_remove = [:actionmailer, :activerecord] - arr
+
+      if to_remove.include?(:activerecord)
+        remove_from_config 'config.active_record.*'
+      end
+
       $:.reject! {|path| path =~ %r'/(#{to_remove.join('|')})/' }
     end
 
@@ -266,6 +310,45 @@ class ActiveSupport::TestCase
   include TestHelpers::Paths
   include TestHelpers::Rack
   include TestHelpers::Generation
+
+  self.test_order = :sorted
+
+  private
+
+  def capture(stream)
+    stream = stream.to_s
+    captured_stream = Tempfile.new(stream)
+    stream_io = eval("$#{stream}")
+    origin_stream = stream_io.dup
+    stream_io.reopen(captured_stream)
+
+    yield
+
+    stream_io.rewind
+    return captured_stream.read
+  ensure
+    captured_stream.close
+    captured_stream.unlink
+    stream_io.reopen(origin_stream)
+  end
+
+  def quietly
+    silence_stream(STDOUT) do
+      silence_stream(STDERR) do
+        yield
+      end
+    end
+  end
+
+  def silence_stream(stream)
+    old_stream = stream.dup
+    stream.reopen(IO::NULL)
+    stream.sync = true
+    yield
+  ensure
+    stream.reopen(old_stream)
+    old_stream.close
+  end
 end
 
 # Create a scope and build a fixture rails app

@@ -60,6 +60,9 @@ module ActiveModel
   #     end
   #   end
   #
+  # Note that the validator is initialized only once for the whole application
+  # life cycle, and not on each validation run.
+  #
   # The easiest way to add custom validators for validating individual attributes
   # is with the convenient <tt>ActiveModel::EachValidator</tt>.
   #
@@ -76,21 +79,19 @@ module ActiveModel
   #     include ActiveModel::Validations
   #     attr_accessor :title
   #
-  #     validates :title, presence: true
+  #     validates :title, presence: true, title: true
   #   end
   #
-  # Validator may also define a +setup+ instance method which will get called
-  # with the class that using that validator as its argument. This can be
-  # useful when there are prerequisites such as an +attr_accessor+ being present.
+  # It can be useful to access the class that is using that validator when there are prerequisites such
+  # as an +attr_accessor+ being present. This class is accessible via +options[:class]+ in the constructor.
+  # To setup your validator override the constructor.
   #
   #   class MyValidator < ActiveModel::Validator
-  #     def setup(klass)
-  #       klass.send :attr_accessor, :custom_attribute
+  #     def initialize(options={})
+  #       super
+  #       options[:class].send :attr_accessor, :custom_attribute
   #     end
   #   end
-  #
-  # This setup method is only called when used with validation macros or the
-  # class level <tt>validates_with</tt> method.
   class Validator
     attr_reader :options
 
@@ -104,10 +105,10 @@ module ActiveModel
 
     # Accepts options that will be made available through the +options+ reader.
     def initialize(options = {})
-      @options = options.freeze
+      @options  = options.except(:class).freeze
     end
 
-    # Return the kind for this validator.
+    # Returns the kind for this validator.
     #
     #   PresenceValidator.new.kind   # => :presence
     #   UniquenessValidator.new.kind # => :uniqueness
@@ -126,7 +127,7 @@ module ActiveModel
   # in the options hash invoking the <tt>validate_each</tt> method passing in the
   # record, attribute and value.
   #
-  # All Active Model validations are built on top of this validator.
+  # All \Active \Model validations are built on top of this validator.
   class EachValidator < Validator #:nodoc:
     attr_reader :attributes
 

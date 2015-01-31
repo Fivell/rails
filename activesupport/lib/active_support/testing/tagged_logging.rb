@@ -6,8 +6,8 @@ module ActiveSupport
       attr_writer :tagged_logger
 
       def before_setup
-        if tagged_logger
-          heading = "#{self.class}: #{__name__}"
+        if tagged_logger && tagged_logger.info?
+          heading = "#{self.class}: #{name}"
           divider = '-' * heading.size
           tagged_logger.info divider
           tagged_logger.info heading

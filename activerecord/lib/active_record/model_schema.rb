@@ -29,8 +29,18 @@ module ActiveRecord
       # :singleton-method:
       # Works like +table_name_prefix+, but appends instead of prepends (set to "_basecamp" gives "projects_basecamp",
       # "people_basecamp"). By default, the suffix is the empty string.
+      #
+      # If you are organising your models within modules, you can add a suffix to the models within
+      # a namespace by defining a singleton method in the parent module called table_name_suffix which
+      # returns your chosen suffix.
       class_attribute :table_name_suffix, instance_writer: false
       self.table_name_suffix = ""
+
+      ##
+      # :singleton-method:
+      # Accessor for the name of the schema migrations table. By default, the value is "schema_migrations"
+      class_attribute :schema_migrations_table_name, instance_accessor: false
+      self.schema_migrations_table_name = "schema_migrations"
 
       ##
       # :singleton-method:
@@ -41,6 +51,19 @@ module ActiveRecord
       self.pluralize_table_names = true
 
       self.inheritance_column = 'type'
+
+      delegate :type_for_attribute, to: :class
+    end
+
+    # Derives the join table name for +first_table+ and +second_table+. The
+    # table names appear in alphabetical order. A common prefix is removed
+    # (useful for namespaced models like Music::Artist and Music::Record):
+    #
+    #   artists, records => artists_records
+    #   records, artists => artists_records
+    #   music_artists, music_records => music_artists_records
+    def self.derive_join_table_name(first_table, second_table) # :nodoc:
+      [first_table.to_s, second_table.to_s].sort.join("\0").gsub(/^(.*_)(.+)\0\1(.+)/, '\1\2_\3').tr("\0", "_")
     end
 
     module ClassMethods
@@ -88,17 +111,6 @@ module ActiveRecord
       #   class Mouse < ActiveRecord::Base
       #     self.table_name = "mice"
       #   end
-      #
-      # Alternatively, you can override the table_name method to define your
-      # own computation. (Possibly using <tt>super</tt> to manipulate the default
-      # table name.) Example:
-      #
-      #   class Post < ActiveRecord::Base
-      #     def self.table_name
-      #       "special_" + super
-      #     end
-      #   end
-      #   Post.table_name # => "special_posts"
       def table_name
         reset_table_name unless defined?(@table_name)
         @table_name
@@ -109,9 +121,6 @@ module ActiveRecord
       #   class Project < ActiveRecord::Base
       #     self.table_name = "project"
       #   end
-      #
-      # You can also just define your own <tt>self.table_name</tt> method; see
-      # the documentation for ActiveRecord::Base#table_name.
       def table_name=(value)
         value = value && value.to_s
 
@@ -124,7 +133,7 @@ module ActiveRecord
         @quoted_table_name = nil
         @arel_table        = nil
         @sequence_name     = nil unless defined?(@explicit_sequence_name) && @explicit_sequence_name
-        @relation          = Relation.new(self, arel_table)
+        @predicate_builder = nil
       end
 
       # Returns a quoted version of the table name, used to construct SQL statements.
@@ -145,6 +154,10 @@ module ActiveRecord
 
       def full_table_name_prefix #:nodoc:
         (parents.detect{ |p| p.respond_to?(:table_name_prefix) } || self).table_name_prefix
+      end
+
+      def full_table_name_suffix #:nodoc:
+        (parents.detect {|p| p.respond_to?(:table_name_suffix) } || self).table_name_suffix
       end
 
       # Defines the name of the table column which will store the class name on single-table
@@ -184,7 +197,7 @@ module ActiveRecord
       # given block. This is required for Oracle and is useful for any
       # database which relies on sequences for primary key generation.
       #
-      # If a sequence name is not explicitly set when using Oracle or Firebird,
+      # If a sequence name is not explicitly set when using Oracle,
       # it will default to the commonly used pattern of: #{table_name}_seq
       #
       # If a sequence name is not explicitly set when using PostgreSQL, it
@@ -203,67 +216,40 @@ module ActiveRecord
         connection.schema_cache.table_exists?(table_name)
       end
 
-      # Returns an array of column objects for the table associated with this class.
-      def columns
-        @columns ||= connection.schema_cache.columns[table_name].map do |col|
-          col = col.dup
-          col.primary = (col.name == primary_key)
-          col
-        end
-      end
-
-      # Returns a hash of column objects for the table associated with this class.
-      def columns_hash
-        @columns_hash ||= Hash[columns.map { |c| [c.name, c] }]
+      def attributes_builder # :nodoc:
+        @attributes_builder ||= AttributeSet::Builder.new(column_types, primary_key)
       end
 
       def column_types # :nodoc:
-        @column_types ||= decorate_columns(columns_hash.dup)
+        @column_types ||= columns_hash.transform_values(&:cast_type).tap do |h|
+          h.default = Type::Value.new
+        end
       end
 
-      def decorate_columns(columns_hash) # :nodoc:
-        return if columns_hash.empty?
-
-        columns_hash.each do |name, col|
-          if serialized_attributes.key?(name)
-            columns_hash[name] = AttributeMethods::Serialization::Type.new(col)
-          end
-          if create_time_zone_conversion_attribute?(name, col)
-            columns_hash[name] = AttributeMethods::TimeZoneConversion::Type.new(col)
-          end
-        end
-
-        columns_hash
+      def type_for_attribute(attr_name) # :nodoc:
+        column_types[attr_name]
       end
 
       # Returns a hash where the keys are column names and the values are
       # default values when instantiating the AR object for this table.
       def column_defaults
-        @column_defaults ||= Hash[columns.map { |c| [c.name, c.default] }]
+        _default_attributes.to_hash
+      end
+
+      def _default_attributes # :nodoc:
+        @default_attributes ||= attributes_builder.build_from_database(
+          raw_default_values)
       end
 
       # Returns an array of column names as strings.
       def column_names
-        @column_names ||= columns.map { |column| column.name }
+        @column_names ||= columns.map(&:name)
       end
 
       # Returns an array of column objects where the primary id, all columns ending in "_id" or "_count",
       # and columns used for single table inheritance have been removed.
       def content_columns
-        @content_columns ||= columns.reject { |c| c.primary || c.name =~ /(_id|_count)$/ || c.name == inheritance_column }
-      end
-
-      # Returns a hash of all the methods added to query each of the columns in the table with the name of the method as the key
-      # and true as the value. This makes it possible to do O(1) lookups in respond_to? to check if a given method for attribute
-      # is available.
-      def column_methods_hash #:nodoc:
-        @dynamic_methods_hash ||= column_names.each_with_object(Hash.new(false)) do |attr, methods|
-          attr_name = attr.to_s
-          methods[attr.to_sym]       = attr_name
-          methods["#{attr}=".to_sym] = attr_name
-          methods["#{attr}?".to_sym] = attr_name
-          methods["#{attr}_before_type_cast".to_sym] = attr_name
-        end
+        @content_columns ||= columns.reject { |c| c.name == primary_key || c.name =~ /(_id|_count)$/ || c.name == inheritance_column }
       end
 
       # Resets all the cached information about columns, which will cause them
@@ -297,23 +283,13 @@ module ActiveRecord
         undefine_attribute_methods
         connection.schema_cache.clear_table_cache!(table_name) if table_exists?
 
-        @arel_engine          = nil
-        @column_defaults      = nil
-        @column_names         = nil
-        @columns              = nil
-        @columns_hash         = nil
-        @column_types         = nil
-        @content_columns      = nil
-        @dynamic_methods_hash = nil
-        @inheritance_column   = nil unless defined?(@explicit_inheritance_column) && @explicit_inheritance_column
-        @relation             = nil
-      end
-
-      # This is a hook for use by modules that need to do extra stuff to
-      # attributes when they are initialized. (e.g. attribute
-      # serialization)
-      def initialize_attributes(attributes, options = {}) #:nodoc:
-        attributes
+        @arel_engine        = nil
+        @arel_table         = nil
+        @column_names       = nil
+        @column_types       = nil
+        @content_columns    = nil
+        @default_attributes = nil
+        @inheritance_column = nil unless defined?(@explicit_inheritance_column) && @explicit_inheritance_column
       end
 
       private
@@ -334,11 +310,16 @@ module ActiveRecord
             contained = contained.singularize if parent.pluralize_table_names
             contained += '_'
           end
-          "#{full_table_name_prefix}#{contained}#{undecorated_table_name(name)}#{table_name_suffix}"
+
+          "#{full_table_name_prefix}#{contained}#{undecorated_table_name(name)}#{full_table_name_suffix}"
         else
           # STI subclasses always use their superclass' table.
           base.table_name
         end
+      end
+
+      def raw_default_values
+        columns_hash.transform_values(&:default)
       end
     end
   end

@@ -26,9 +26,12 @@ module ActiveRecord
           $stdout.print error.error
           establish_connection root_configuration_without_database
           connection.create_database configuration['database'], creation_options
-          connection.execute grant_statement.gsub(/\s+/, ' ').strip
+          if configuration['username'] != 'root'
+            connection.execute grant_statement.gsub(/\s+/, ' ').strip
+          end
           establish_connection configuration
         else
+          $stderr.puts error.inspect
           $stderr.puts "Couldn't create database for #{configuration.inspect}, #{creation_options.inspect}"
           $stderr.puts "(If you set the charset manually, make sure you have a matching collation)" if configuration['encoding']
         end
@@ -40,7 +43,7 @@ module ActiveRecord
       end
 
       def purge
-        establish_connection :test
+        establish_connection configuration
         connection.recreate_database configuration['database'], creation_options
       end
 
@@ -57,7 +60,10 @@ module ActiveRecord
         args.concat(["--result-file", "#{filename}"])
         args.concat(["--no-data"])
         args.concat(["#{configuration['database']}"])
-        Kernel.system(*args)
+        unless Kernel.system(*args)
+          $stderr.puts "Could not dump the database structure. "\
+                       "Make sure `mysqldump` is in your PATH and check the command output for warnings."
+        end
       end
 
       def structure_load(filename)
@@ -119,7 +125,7 @@ IDENTIFIED BY '#{configuration['password']}' WITH GRANT OPTION;
       end
 
       def root_password
-        $stdout.print "Please provide the root password for your mysql installation\n>"
+        $stdout.print "Please provide the root password for your MySQL installation\n>"
         $stdin.gets.strip
       end
 
@@ -129,8 +135,9 @@ IDENTIFIED BY '#{configuration['password']}' WITH GRANT OPTION;
         args << "--password=#{configuration['password']}"  if configuration['password']
         args.concat(['--default-character-set', configuration['encoding']]) if configuration['encoding']
         configuration.slice('host', 'port', 'socket').each do |k, v|
-          args.concat([ "--#{k}", v ]) if v
+          args.concat([ "--#{k}", v.to_s ]) if v
         end
+
         args
       end
     end

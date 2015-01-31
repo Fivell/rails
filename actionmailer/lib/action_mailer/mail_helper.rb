@@ -1,4 +1,7 @@
 module ActionMailer
+  # Provides helper methods for ActionMailer::Base that can be used for easily
+  # formatting messages, accessing mailer or message instances, and the
+  # attachments list.
   module MailHelper
     # Take the text and format it, indented two spaces for each line, and
     # wrapped at 72 columns.
@@ -8,8 +11,8 @@ module ActionMailer
       }.join("\n\n")
 
       # Make list points stand on their own line
-      formatted.gsub!(/[ ]*([*]+) ([^*]*)/) { |s| "  #{$1} #{$2.strip}\n" }
-      formatted.gsub!(/[ ]*([#]+) ([^#]*)/) { |s| "  #{$1} #{$2.strip}\n" }
+      formatted.gsub!(/[ ]*([*]+) ([^*]*)/) { "  #{$1} #{$2.strip}\n" }
+      formatted.gsub!(/[ ]*([#]+) ([^#]*)/) { "  #{$1} #{$2.strip}\n" }
 
       formatted
     end
@@ -26,7 +29,7 @@ module ActionMailer
 
     # Access the message attachments list.
     def attachments
-      @_message.attachments
+      mailer.attachments
     end
 
     # Returns +text+ wrapped at +len+ columns and indented +indent+ spaces.
@@ -46,8 +49,9 @@ module ActionMailer
         end
       end
 
-      sentences.map { |sentence|
-        "#{" " * indent}#{sentence.join(' ')}"
+      indentation = " " * indent
+      sentences.map! { |sentence|
+        "#{indentation}#{sentence.join(' ')}"
       }.join "\n"
     end
   end

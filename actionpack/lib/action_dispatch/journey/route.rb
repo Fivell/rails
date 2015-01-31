@@ -23,6 +23,7 @@ module ActionDispatch
         @parts             = nil
         @decorated_ast     = nil
         @precedence        = 0
+        @path_formatter    = @path.build_formatter
       end
 
       def ast
@@ -59,24 +60,16 @@ module ActionDispatch
       end
 
       def parts
-        @parts ||= segments.map { |n| n.to_sym }
+        @parts ||= segments.map(&:to_sym)
       end
       alias :segment_keys :parts
 
       def format(path_options)
-        path_options.delete_if do |key, value|
-          value.to_s == defaults[key].to_s && !required_parts.include?(key)
-        end
-
-        Visitors::Formatter.new(path_options).accept(path.spec)
-      end
-
-      def optional_parts
-        path.optional_names.map { |n| n.to_sym }
+        @path_formatter.evaluate path_options
       end
 
       def required_parts
-        @required_parts ||= path.required_names.map { |n| n.to_sym }
+        @required_parts ||= path.required_names.map(&:to_sym)
       end
 
       def required_default?(key)
@@ -89,6 +82,14 @@ module ActionDispatch
         end
       end
 
+      def glob?
+        !path.spec.grep(Nodes::Star).empty?
+      end
+
+      def dispatcher?
+        @app.dispatcher?
+      end
+
       def matches?(request)
         constraints.all? do |method, value|
           next true unless request.respond_to?(method)
@@ -98,6 +99,10 @@ module ActionDispatch
             value === request.send(method).to_s
           when Array
             value.include?(request.send(method))
+          when TrueClass
+            request.send(method).present?
+          when FalseClass
+            request.send(method).blank?
           else
             value === request.send(method)
           end

@@ -1,6 +1,7 @@
 require "cases/helper"
 require 'models/computer'
 require 'models/developer'
+require 'models/computer'
 require 'models/project'
 require 'models/company'
 require 'models/categorization'
@@ -18,10 +19,12 @@ require 'models/ship'
 require 'models/liquid'
 require 'models/molecule'
 require 'models/electron'
+require 'models/man'
+require 'models/interest'
 
 class AssociationsTest < ActiveRecord::TestCase
   fixtures :accounts, :companies, :developers, :projects, :developers_projects,
-           :computers, :people, :readers
+           :computers, :people, :readers, :authors, :author_favorites
 
   def test_eager_loading_should_not_change_count_of_children
     liquid = Liquid.create(:name => 'salty')
@@ -33,12 +36,19 @@ class AssociationsTest < ActiveRecord::TestCase
     assert_equal 1, liquids[0].molecules.length
   end
 
+  def test_subselect
+    author = authors :david
+    favs = author.author_favorites
+    fav2 = author.author_favorites.where(:author => Author.where(id: author.id)).to_a
+    assert_equal favs, fav2
+  end
+
   def test_clear_association_cache_stored
     firm = Firm.find(1)
     assert_kind_of Firm, firm
 
     firm.clear_association_cache
-    assert_equal Firm.find(1).clients.collect{ |x| x.name }.sort, firm.clients.collect{ |x| x.name }.sort
+    assert_equal Firm.find(1).clients.collect(&:name).sort, firm.clients.collect(&:name).sort
   end
 
   def test_clear_association_cache_new_record
@@ -95,7 +105,7 @@ class AssociationsTest < ActiveRecord::TestCase
   def test_force_reload
     firm = Firm.new("name" => "A New Firm, Inc")
     firm.save
-    firm.clients.each {|c|} # forcing to load all clients
+    firm.clients.each {} # forcing to load all clients
     assert firm.clients.empty?, "New firm shouldn't have client objects"
     assert_equal 0, firm.clients.size, "New firm should have 0 clients"
 
@@ -131,7 +141,7 @@ class AssociationsTest < ActiveRecord::TestCase
 
   def test_association_with_references
     firm = companies(:first_firm)
-    assert_equal ['foo'], firm.association_with_references.references_values
+    assert_includes firm.association_with_references.references_values, 'foo'
   end
 
 end
@@ -172,6 +182,18 @@ class AssociationProxyTest < ActiveRecord::TestCase
     assert_equal 1, josh.posts.size
   end
 
+  def test_append_behaves_like_push
+    josh = Author.new(:name => "Josh")
+    josh.posts.append Post.new(:title => "New on Edge", :body => "More cool stuff!")
+    assert josh.posts.loaded?
+    assert_equal 1, josh.posts.size
+  end
+
+  def test_prepend_is_not_defined
+    josh = Author.new(:name => "Josh")
+    assert_raises(NoMethodError) { josh.posts.prepend Post.new }
+  end
+
   def test_save_on_parent_does_not_load_target
     david = developers(:david)
 
@@ -203,7 +225,7 @@ class AssociationProxyTest < ActiveRecord::TestCase
     assert_equal post.body, "More cool stuff!"
   end
 
-  def test_reload_returns_assocition
+  def test_reload_returns_association
     david = developers(:david)
     assert_nothing_raised do
       assert_equal david.projects, david.projects.reload.reload
@@ -216,7 +238,7 @@ class AssociationProxyTest < ActiveRecord::TestCase
   end
 
   def test_scoped_allows_conditions
-    assert developers(:david).projects.merge!(where: 'foo').where_values.include?('foo')
+    assert developers(:david).projects.merge(where: 'foo').to_sql.include?('foo')
   end
 
   test "getting a scope from an association" do
@@ -225,10 +247,39 @@ class AssociationProxyTest < ActiveRecord::TestCase
     assert david.projects.scope.is_a?(ActiveRecord::Relation)
     assert_equal david.projects, david.projects.scope
   end
+
+  test "proxy object is cached" do
+    david = developers(:david)
+    assert david.projects.equal?(david.projects)
+  end
+
+  test "inverses get set of subsets of the association" do
+    man = Man.create
+    man.interests.create
+
+    man = Man.find(man.id)
+
+    assert_queries(1) do
+      assert_equal man, man.interests.where("1=1").first.man
+    end
+  end
+
+  test "first! works on loaded associations" do
+    david = authors(:david)
+    assert_equal david.posts.first, david.posts.reload.first!
+  end
+
+  def test_reset_unloads_target
+    david = authors(:david)
+    david.posts.reload
+
+    assert david.posts.loaded?
+    david.posts.reset
+    assert !david.posts.loaded?
+  end
 end
 
 class OverridingAssociationsTest < ActiveRecord::TestCase
-  class Person < ActiveRecord::Base; end
   class DifferentPerson < ActiveRecord::Base; end
 
   class PeopleList < ActiveRecord::Base
@@ -249,7 +300,7 @@ class OverridingAssociationsTest < ActiveRecord::TestCase
   def test_habtm_association_redefinition_callbacks_should_differ_and_not_inherited
     # redeclared association on AR descendant should not inherit callbacks from superclass
     callbacks = PeopleList.before_add_for_has_and_belongs_to_many
-    assert_equal([:enlist], callbacks)
+    assert_equal(1, callbacks.length)
     callbacks = DifferentPeopleList.before_add_for_has_and_belongs_to_many
     assert_equal([], callbacks)
   end
@@ -257,7 +308,7 @@ class OverridingAssociationsTest < ActiveRecord::TestCase
   def test_has_many_association_redefinition_callbacks_should_differ_and_not_inherited
     # redeclared association on AR descendant should not inherit callbacks from superclass
     callbacks = PeopleList.before_add_for_has_many
-    assert_equal([:enlist], callbacks)
+    assert_equal(1, callbacks.length)
     callbacks = DifferentPeopleList.before_add_for_has_many
     assert_equal([], callbacks)
   end
@@ -291,7 +342,7 @@ class OverridingAssociationsTest < ActiveRecord::TestCase
   end
 
   def test_requires_symbol_argument
-    assert_raises ArgumentError do 
+    assert_raises ArgumentError do
       Class.new(Post) do
         belongs_to "author"
       end
@@ -311,5 +362,19 @@ class GeneratedMethodsTest < ActiveRecord::TestCase
 
   def test_model_method_overrides_association_method
     assert_equal(comments(:greetings).body, posts(:welcome).first_comment)
+  end
+
+  module MyModule
+    def comments; :none end
+  end
+
+  class MyArticle < ActiveRecord::Base
+    self.table_name = "articles"
+    include MyModule
+    has_many :comments, inverse_of: false
+  end
+
+  def test_included_module_overwrites_association_methods
+    assert_equal :none, MyArticle.new.comments
   end
 end

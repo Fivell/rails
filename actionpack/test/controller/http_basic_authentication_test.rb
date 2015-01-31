@@ -83,6 +83,13 @@ class HttpBasicAuthenticationTest < ActionController::TestCase
       assert_response :unauthorized
       assert_equal "HTTP Basic: Access denied.\n", @response.body, "Authentication didn't fail for request header #{header} and long credentials"
     end
+
+    test "unsuccessful authentication with #{header.downcase} and no credentials" do
+      get :show
+
+      assert_response :unauthorized
+      assert_equal "HTTP Basic: Access denied.\n", @response.body, "Authentication didn't fail for request header #{header} and no credentials"
+    end
   end
 
   def test_encode_credentials_has_no_newline
@@ -125,6 +132,13 @@ class HttpBasicAuthenticationTest < ActionController::TestCase
     assert_response :success
 
     @request.env['HTTP_AUTHORIZATION'] = encode_credentials('David', 'WRONG!')
+    get :search
+    assert_response :unauthorized
+  end
+
+  test "authentication request with wrong scheme" do
+    header = 'Bearer ' + encode_credentials('David', 'Goliath').split(' ', 2)[1]
+    @request.env['HTTP_AUTHORIZATION'] = header
     get :search
     assert_response :unauthorized
   end

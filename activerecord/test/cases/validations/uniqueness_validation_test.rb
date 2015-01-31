@@ -30,13 +30,13 @@ class ReplyWithTitleObject < Reply
   def title; ReplyTitle.new; end
 end
 
-class Employee < ActiveRecord::Base
-  self.table_name = 'postgresql_arrays'
-  validates_uniqueness_of :nicknames
+class TopicWithUniqEvent < Topic
+  belongs_to :event, foreign_key: :parent_id
+  validates :event, uniqueness: true
 end
 
 class UniquenessValidationTest < ActiveRecord::TestCase
-  fixtures :topics, 'warehouse-things', :developers
+  fixtures :topics, 'warehouse-things'
 
   repair_validations(Topic, Reply)
 
@@ -54,8 +54,16 @@ class UniquenessValidationTest < ActiveRecord::TestCase
     assert !t2.save, "Shouldn't save t2 as unique"
     assert_equal ["has already been taken"], t2.errors[:title]
 
-    t2.title = "Now Im really also unique"
+    t2.title = "Now I am really also unique"
     assert t2.save, "Should now save t2 as unique"
+  end
+
+  def test_validate_uniqueness_with_alias_attribute
+    Topic.alias_attribute :new_title, :title
+    Topic.validates_uniqueness_of(:new_title)
+
+    topic = Topic.new(new_title: 'abc')
+    assert topic.valid?
   end
 
   def test_validates_uniqueness_with_nil_value
@@ -210,7 +218,7 @@ class UniquenessValidationTest < ActiveRecord::TestCase
     assert t_utf8.save, "Should save t_utf8 as unique"
 
     # If database hasn't UTF-8 character set, this test fails
-    if Topic.all.merge!(:select => 'LOWER(title) AS title').find(t_utf8).title == "я тоже уникальный!"
+    if Topic.all.merge!(:select => 'LOWER(title) AS title').find(t_utf8.id).title == "я тоже уникальный!"
       t2_utf8 = Topic.new("title" => "я тоже УНИКАЛЬНЫЙ!")
       assert !t2_utf8.valid?, "Shouldn't be valid"
       assert !t2_utf8.save, "Shouldn't save t2_utf8 as unique"
@@ -268,7 +276,7 @@ class UniquenessValidationTest < ActiveRecord::TestCase
   end
 
   def test_validate_case_sensitive_uniqueness_with_attribute_passed_as_integer
-    Topic.validates_uniqueness_of(:title, :case_sensitve => true)
+    Topic.validates_uniqueness_of(:title, :case_sensitive => true)
     Topic.create!('title' => 101)
 
     t2 = Topic.new('title' => 101)
@@ -348,7 +356,7 @@ class UniquenessValidationTest < ActiveRecord::TestCase
   end
 
   def test_validate_uniqueness_with_conditions
-    Topic.validates_uniqueness_of(:title, :conditions => Topic.where('approved = ?', true))
+    Topic.validates_uniqueness_of :title, conditions: -> { where(approved: true) }
     Topic.create("title" => "I'm a topic", "approved" => true)
     Topic.create("title" => "I'm an unapproved topic", "approved" => false)
 
@@ -359,15 +367,23 @@ class UniquenessValidationTest < ActiveRecord::TestCase
     assert t4.valid?, "t4 should be valid"
   end
 
-  def test_validate_uniqueness_with_array_column
-    return skip "Uniqueness on arrays has only been tested in PostgreSQL so far." if !current_adapter? :PostgreSQLAdapter
+  def test_validate_uniqueness_with_non_callable_conditions_is_not_supported
+    assert_raises(ArgumentError) {
+      Topic.validates_uniqueness_of :title, conditions: Topic.where(approved: true)
+    }
+  end
 
-    e1 = Employee.create("nicknames" => ["john", "johnny"], "commission_by_quarter" => [1000, 1200])
-    assert e1.persisted?, "Saving e1"
+  def test_validate_uniqueness_on_existing_relation
+    event = Event.create
+    assert TopicWithUniqEvent.create(event: event).valid?
 
-    e2 = Employee.create("nicknames" => ["john", "johnny"], "commission_by_quarter" => [2200])
-    assert !e2.persisted?, "e2 shouldn't be valid"
-    assert e2.errors[:nicknames].any?, "Should have errors for nicknames"
-    assert_equal ["has already been taken"], e2.errors[:nicknames], "Should have uniqueness message for nicknames"
+    topic = TopicWithUniqEvent.new(event: event)
+    assert_not topic.valid?
+    assert_equal ['has already been taken'], topic.errors[:event]
+  end
+
+  def test_validate_uniqueness_on_empty_relation
+    topic = TopicWithUniqEvent.new
+    assert topic.valid?
   end
 end

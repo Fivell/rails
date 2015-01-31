@@ -3,7 +3,11 @@ require 'rack/utils'
 
 module ActionDispatch
   class TestRequest < Request
-    DEFAULT_ENV = Rack::MockRequest.env_for('/')
+    DEFAULT_ENV = Rack::MockRequest.env_for('/',
+      'HTTP_HOST'       => 'test.host',
+      'REMOTE_ADDR'     => '0.0.0.0',
+      'HTTP_USER_AGENT' => 'Rails Testing'
+    )
 
     def self.new(env = {})
       super
@@ -12,10 +16,6 @@ module ActionDispatch
     def initialize(env = {})
       env = Rails.application.env_config.merge(env) if defined?(Rails.application) && Rails.application
       super(default_env.merge(env))
-
-      self.host        = 'test.host'
-      self.remote_addr = '0.0.0.0'
-      self.user_agent  = 'Rails Testing'
     end
 
     def request_method=(method)
@@ -39,7 +39,7 @@ module ActionDispatch
     end
 
     def action=(action_name)
-      path_parameters["action"] = action_name.to_s
+      path_parameters[:action] = action_name.to_s
     end
 
     def if_modified_since=(last_modified)
@@ -60,7 +60,7 @@ module ActionDispatch
 
     def accept=(mime_types)
       @env.delete('action_dispatch.request.accepts')
-      @env['HTTP_ACCEPT'] = Array(mime_types).collect { |mime_type| mime_type.to_s }.join(",")
+      @env['HTTP_ACCEPT'] = Array(mime_types).collect(&:to_s).join(",")
     end
 
     alias :rack_cookies :cookies

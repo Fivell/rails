@@ -8,7 +8,10 @@ class Person < ActiveRecord::Base
   has_many :posts_with_no_comments, -> { includes(:comments).where('comments.id is null').references(:comments) },
                                     :through => :readers, :source => :post
 
-  has_many :followers, foreign_key: 'friend_id', class_name: 'Friendship'
+  has_many :friendships, foreign_key: 'friend_id'
+  # friends_too exists to test a bug, and probably shouldn't be used elsewhere
+  has_many :friends_too, foreign_key: 'friend_id', class_name: 'Friendship'
+  has_many :followers, through: :friendships
 
   has_many :references
   has_many :bad_references
@@ -27,8 +30,11 @@ class Person < ActiveRecord::Base
   has_many :agents_of_agents, :through => :agents, :source => :agents
   belongs_to :number1_fan, :class_name => 'Person'
 
+  has_many :personal_legacy_things, :dependent => :destroy
+
   has_many :agents_posts,         :through => :agents,       :source => :posts
   has_many :agents_posts_authors, :through => :agents_posts, :source => :author
+  has_many :essays, primary_key: "first_name", foreign_key: "writer_id"
 
   scope :males,   -> { where(:gender => 'M') }
   scope :females, -> { where(:gender => 'F') }
@@ -85,6 +91,19 @@ class RichPerson < ActiveRecord::Base
   self.table_name = 'people'
 
   has_and_belongs_to_many :treasures, :join_table => 'peoples_treasures'
+
+  before_validation :run_before_create, on: :create
+  before_validation :run_before_validation
+
+  private
+
+  def run_before_create
+    self.first_name = first_name.to_s + 'run_before_create'
+  end
+
+  def run_before_validation
+    self.first_name = first_name.to_s + 'run_before_validation'
+  end
 end
 
 class NestedPerson < ActiveRecord::Base

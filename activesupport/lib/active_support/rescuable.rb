@@ -1,6 +1,5 @@
 require 'active_support/concern'
 require 'active_support/core_ext/class/attribute'
-require 'active_support/core_ext/proc'
 require 'active_support/core_ext/string/inflections'
 require 'active_support/core_ext/array/extract_options'
 
@@ -61,7 +60,7 @@ module ActiveSupport
         end
 
         klasses.each do |klass|
-          key = if klass.is_a?(Class) && klass <= Exception
+          key = if klass.is_a?(Module) && klass.respond_to?(:===)
             klass.name
           elsif klass.is_a?(String)
             klass
@@ -102,7 +101,7 @@ module ActiveSupport
         # itself when rescue_from CONSTANT is executed.
         klass = self.class.const_get(klass_name) rescue nil
         klass ||= klass_name.constantize rescue nil
-        exception.is_a?(klass) if klass
+        klass === exception if klass
       end
 
       case rescuer

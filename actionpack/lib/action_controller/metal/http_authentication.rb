@@ -11,11 +11,11 @@ module ActionController
     #     http_basic_authenticate_with name: "dhh", password: "secret", except: :index
     #
     #     def index
-    #       render text: "Everyone can see me!"
+    #       render plain: "Everyone can see me!"
     #     end
     #
     #     def edit
-    #       render text: "I'm only accessible if you know the password"
+    #       render plain: "I'm only accessible if you know the password"
     #     end
     #  end
     #
@@ -29,7 +29,7 @@ module ActionController
     #
     #     protected
     #       def set_account
-    #         @account = Account.find_by_url_name(request.subdomains.first)
+    #         @account = Account.find_by(url_name: request.subdomains.first)
     #       end
     #
     #       def authenticate
@@ -53,10 +53,8 @@ module ActionController
     # In your integration tests, you can do something like this:
     #
     #   def test_access_granted_from_xml
-    #     get(
-    #       "/notes/1.xml", nil,
-    #       'HTTP_AUTHORIZATION' => ActionController::HttpAuthentication::Basic.encode_credentials(users(:dhh).name, users(:dhh).password)
-    #     )
+    #     @request.env['HTTP_AUTHORIZATION'] = ActionController::HttpAuthentication::Basic.encode_credentials(users(:dhh).name, users(:dhh).password)
+    #     get "/notes/1.xml"
     #
     #     assert_equal 200, status
     #   end
@@ -90,17 +88,29 @@ module ActionController
       end
 
       def authenticate(request, &login_procedure)
-        unless request.authorization.blank?
+        if has_basic_credentials?(request)
           login_procedure.call(*user_name_and_password(request))
         end
       end
 
+      def has_basic_credentials?(request)
+        request.authorization.present? && (auth_scheme(request) == 'Basic')
+      end
+
       def user_name_and_password(request)
-        decode_credentials(request).split(/:/, 2)
+        decode_credentials(request).split(':', 2)
       end
 
       def decode_credentials(request)
-        ::Base64.decode64(request.authorization.split(' ', 2).last || '')
+        ::Base64.decode64(auth_param(request) || '')
+      end
+
+      def auth_scheme(request)
+        request.authorization.to_s.split(' ', 2).first
+      end
+
+      def auth_param(request)
+        request.authorization.to_s.split(' ', 2).second
       end
 
       def encode_credentials(user_name, password)
@@ -109,8 +119,8 @@ module ActionController
 
       def authentication_request(controller, realm)
         controller.headers["WWW-Authenticate"] = %(Basic realm="#{realm.gsub(/"/, "")}")
-        controller.response_body = "HTTP Basic: Access denied.\n"
         controller.status = 401
+        controller.response_body = "HTTP Basic: Access denied.\n"
       end
     end
 
@@ -127,11 +137,11 @@ module ActionController
     #     before_action :authenticate, except: [:index]
     #
     #     def index
-    #       render text: "Everyone can see me!"
+    #       render plain: "Everyone can see me!"
     #     end
     #
     #     def edit
-    #       render text: "I'm only accessible if you know the password"
+    #       render plain: "I'm only accessible if you know the password"
     #     end
     #
     #     private
@@ -244,8 +254,8 @@ module ActionController
       def authentication_request(controller, realm, message = nil)
         message ||= "HTTP Digest: Access denied.\n"
         authentication_header(controller, realm)
-        controller.response_body = message
         controller.status = 401
+        controller.response_body = message
       end
 
       def secret_token(request)
@@ -299,6 +309,7 @@ module ActionController
       # allow a user to use new nonce without prompting user again for their
       # username and password.
       def validate_nonce(secret_key, request, value, seconds_to_timeout=5*60)
+        return false if value.nil?
         t = ::Base64.decode64(value).split(":").first.to_i
         nonce(secret_key, t) == value && (t - Time.now.to_i).abs <= seconds_to_timeout
       end
@@ -320,11 +331,11 @@ module ActionController
     #     before_action :authenticate, except: [ :index ]
     #
     #     def index
-    #       render text: "Everyone can see me!"
+    #       render plain: "Everyone can see me!"
     #     end
     #
     #     def edit
-    #       render text: "I'm only accessible if you know the password"
+    #       render plain: "I'm only accessible if you know the password"
     #     end
     #
     #     private
@@ -344,7 +355,7 @@ module ActionController
     #
     #     protected
     #       def set_account
-    #         @account = Account.find_by_url_name(request.subdomains.first)
+    #         @account = Account.find_by(url_name: request.subdomains.first)
     #       end
     #
     #       def authenticate
@@ -384,6 +395,7 @@ module ActionController
     #
     #   RewriteRule ^(.*)$ dispatch.fcgi [E=X-HTTP_AUTHORIZATION:%{HTTP:Authorization},QSA,L]
     module Token
+      TOKEN_KEY = 'token='
       TOKEN_REGEX = /^Token /
       AUTHN_PAIR_DELIMITERS = /(?:,|;|\t+)/
       extend self
@@ -436,7 +448,7 @@ module ActionController
         authorization_request = request.authorization.to_s
         if authorization_request[TOKEN_REGEX]
           params = token_params_from authorization_request
-          [params.shift.last, Hash[params].with_indifferent_access]
+          [params.shift[1], Hash[params].with_indifferent_access]
         end
       end
 
@@ -449,16 +461,22 @@ module ActionController
         raw_params.map { |param| param.split %r/=(.+)?/ }
       end
 
-      # This removes the `"` characters wrapping the value.
+      # This removes the <tt>"</tt> characters wrapping the value.
       def rewrite_param_values(array_params)
-        array_params.each { |param| param.last.gsub! %r/^"|"$/, '' }
+        array_params.each { |param| (param[1] || "").gsub! %r/^"|"$/, '' }
       end
 
       # This method takes an authorization body and splits up the key-value
-      # pairs by the standardized `:`, `;`, or `\t` delimiters defined in
-      # `AUTHN_PAIR_DELIMITERS`.
+      # pairs by the standardized <tt>:</tt>, <tt>;</tt>, or <tt>\t</tt>
+      # delimiters defined in +AUTHN_PAIR_DELIMITERS+.
       def raw_params(auth)
-        auth.sub(TOKEN_REGEX, '').split(/"\s*#{AUTHN_PAIR_DELIMITERS}\s*/)
+        _raw_params = auth.sub(TOKEN_REGEX, '').split(/\s*#{AUTHN_PAIR_DELIMITERS}\s*/)
+
+        if !(_raw_params.first =~ %r{\A#{TOKEN_KEY}})
+          _raw_params[0] = "#{TOKEN_KEY}#{_raw_params.first}"
+        end
+
+        _raw_params
       end
 
       # Encodes the given token and options into an Authorization header value.
@@ -468,7 +486,7 @@ module ActionController
       #
       # Returns String.
       def encode_credentials(token, options = {})
-        values = ["token=#{token.to_s.inspect}"] + options.map do |key, value|
+        values = ["#{TOKEN_KEY}#{token.to_s.inspect}"] + options.map do |key, value|
           "#{key}=#{value.to_s.inspect}"
         end
         "Token #{values * ", "}"

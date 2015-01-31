@@ -9,15 +9,26 @@ module DateAndTime
       :saturday  => 5,
       :sunday    => 6
     }
+    WEEKEND_DAYS = [ 6, 0 ]
 
     # Returns a new date/time representing yesterday.
     def yesterday
-      advance(:days => -1)
+      advance(days: -1)
+    end
+
+    # Returns a new date/time representing the previous day.
+    def prev_day
+      advance(days: -1)
     end
 
     # Returns a new date/time representing tomorrow.
     def tomorrow
-      advance(:days => 1)
+      advance(days: 1)
+    end
+
+    # Returns a new date/time representing the next day.
+    def next_day
+      advance(days: 1)
     end
 
     # Returns true if the date/time is today.
@@ -33,6 +44,11 @@ module DateAndTime
     # Returns true if the date/time is in the future.
     def future?
       self > self.class.current
+    end
+
+    # Returns true if the date/time falls on a Saturday or Sunday.
+    def on_weekend?
+      WEEKEND_DAYS.include?(wday)
     end
 
     # Returns a new date/time the specified number of days ago.
@@ -78,7 +94,7 @@ module DateAndTime
     # Returns a new date/time at the start of the month.
     # DateTime objects will have a time set to 0:00.
     def beginning_of_month
-      first_hour{ change(:day => 1) }
+      first_hour(change(:day => 1))
     end
     alias :at_beginning_of_month :beginning_of_month
 
@@ -93,7 +109,7 @@ module DateAndTime
 
     # Returns a new date/time at the end of the quarter.
     # Example: 31st March, 30th June, 30th September.
-    # DateTIme objects will have a time set to 23:59:59.
+    # DateTime objects will have a time set to 23:59:59.
     def end_of_quarter
       last_quarter_month = [3, 6, 9, 12].detect { |m| m >= month }
       beginning_of_month.change(:month => last_quarter_month).end_of_month
@@ -109,11 +125,21 @@ module DateAndTime
     alias :at_beginning_of_year :beginning_of_year
 
     # Returns a new date/time representing the given day in the next week.
-    # Week is assumed to start on +start_day+, default is
-    # +Date.beginning_of_week+ or +config.beginning_of_week+ when set.
-    # DateTime objects have their time set to 0:00.
-    def next_week(start_day = Date.beginning_of_week)
-      first_hour{ weeks_since(1).beginning_of_week.days_since(days_span(start_day)) }
+    # The +given_day_in_next_week+ defaults to the beginning of the week
+    # which is determined by +Date.beginning_of_week+ or +config.beginning_of_week+
+    # when set. +DateTime+ objects have their time set to 0:00 unless +same_time+ is true.
+    def next_week(given_day_in_next_week = Date.beginning_of_week, same_time: false)
+      result = first_hour(weeks_since(1).beginning_of_week.days_since(days_span(given_day_in_next_week)))
+      same_time ? copy_time_to(result) : result
+    end
+
+    # Returns a new date/time representing the next weekday.
+    def next_weekday
+      if next_day.on_weekend?
+        next_week(:monday, same_time: true)
+      else
+        next_day
+      end
     end
 
     # Short-hand for months_since(1).
@@ -134,11 +160,22 @@ module DateAndTime
     # Returns a new date/time representing the given day in the previous week.
     # Week is assumed to start on +start_day+, default is
     # +Date.beginning_of_week+ or +config.beginning_of_week+ when set.
-    # DateTime objects have their time set to 0:00.
-    def prev_week(start_day = Date.beginning_of_week)
-      first_hour{ weeks_ago(1).beginning_of_week.days_since(days_span(start_day)) }
+    # DateTime objects have their time set to 0:00 unless +same_time+ is true.
+    def prev_week(start_day = Date.beginning_of_week, same_time: false)
+      result = first_hour(weeks_ago(1).beginning_of_week.days_since(days_span(start_day)))
+      same_time ? copy_time_to(result) : result
     end
     alias_method :last_week, :prev_week
+
+    # Returns a new date/time representing the previous weekday.
+    def prev_weekday
+      if prev_day.on_weekend?
+        copy_time_to(beginning_of_week(:friday))
+      else
+        prev_day
+      end
+    end
+    alias_method :last_weekday, :prev_weekday
 
     # Short-hand for months_ago(1).
     def prev_month
@@ -188,7 +225,7 @@ module DateAndTime
     # +Date.beginning_of_week+ or +config.beginning_of_week+ when set.
     # DateTime objects have their time set to 23:59:59.
     def end_of_week(start_day = Date.beginning_of_week)
-      last_hour{ days_since(6 - days_to_week_start(start_day)) }
+      last_hour(days_since(6 - days_to_week_start(start_day)))
     end
     alias :at_end_of_week :end_of_week
 
@@ -202,7 +239,7 @@ module DateAndTime
     # DateTime objects will have a time set to 23:59:59.
     def end_of_month
       last_day = ::Time.days_in_month(month, year)
-      last_hour{ days_since(last_day - day) }
+      last_hour(days_since(last_day - day))
     end
     alias :at_end_of_month :end_of_month
 
@@ -213,20 +250,42 @@ module DateAndTime
     end
     alias :at_end_of_year :end_of_year
 
+    # Returns a Range representing the whole week of the current date/time.
+    # Week starts on start_day, default is <tt>Date.week_start</tt> or <tt>config.week_start</tt> when set.
+    def all_week(start_day = Date.beginning_of_week)
+      beginning_of_week(start_day)..end_of_week(start_day)
+    end
+
+    # Returns a Range representing the whole month of the current date/time.
+    def all_month
+      beginning_of_month..end_of_month
+    end
+
+    # Returns a Range representing the whole quarter of the current date/time.
+    def all_quarter
+      beginning_of_quarter..end_of_quarter
+    end
+
+    # Returns a Range representing the whole year of the current date/time.
+    def all_year
+      beginning_of_year..end_of_year
+    end
+
     private
+      def first_hour(date_or_time)
+        date_or_time.acts_like?(:time) ? date_or_time.beginning_of_day : date_or_time
+      end
 
-    def first_hour
-      result = yield
-      acts_like?(:time) ? result.change(:hour => 0) : result
-    end
+      def last_hour(date_or_time)
+        date_or_time.acts_like?(:time) ? date_or_time.end_of_day : date_or_time
+      end
 
-    def last_hour
-      result = yield
-      acts_like?(:time) ? result.end_of_day : result
-    end
+      def days_span(day)
+        (DAYS_INTO_WEEK[day] - DAYS_INTO_WEEK[Date.beginning_of_week]) % 7
+      end
 
-    def days_span(day)
-      (DAYS_INTO_WEEK[day] - DAYS_INTO_WEEK[Date.beginning_of_week]) % 7
-    end
+      def copy_time_to(other)
+        other.change(hour: hour, min: min, sec: sec, usec: try(:usec))
+      end
   end
 end

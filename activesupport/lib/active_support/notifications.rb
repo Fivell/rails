@@ -1,5 +1,6 @@
 require 'active_support/notifications/instrumenter'
 require 'active_support/notifications/fanout'
+require 'active_support/per_thread_registry'
 
 module ActiveSupport
   # = Notifications
@@ -15,7 +16,7 @@ module ActiveSupport
   #     render text: 'Foo'
   #   end
   #
-  # That executes the block first and notifies all subscribers once done.
+  # That first executes the block and then notifies all subscribers once done.
   #
   # In the example above +render+ is the name of the event, and the rest is called
   # the _payload_. The payload is a mechanism that allows instrumenters to pass
@@ -140,10 +141,15 @@ module ActiveSupport
   #
   #   ActiveSupport::Notifications.unsubscribe(subscriber)
   #
+  # You can also unsubscribe by passing the name of the subscriber object. Note
+  # that this will unsubscribe all subscriptions with the given name:
+  #
+  #   ActiveSupport::Notifications.unsubscribe("render")
+  #
   # == Default Queue
   #
-  # Notifications ships with a queue implementation that consumes and publish events
-  # to log subscribers in a thread. You can use any queue implementation you want.
+  # Notifications ships with a queue implementation that consumes and publishes events
+  # to all log subscribers. You can use any queue implementation you want.
   #
   module Notifications
     class << self
@@ -172,12 +178,32 @@ module ActiveSupport
         unsubscribe(subscriber)
       end
 
-      def unsubscribe(args)
-        notifier.unsubscribe(args)
+      def unsubscribe(subscriber_or_name)
+        notifier.unsubscribe(subscriber_or_name)
       end
 
       def instrumenter
-        Thread.current[:"instrumentation_#{notifier.object_id}"] ||= Instrumenter.new(notifier)
+        InstrumentationRegistry.instance.instrumenter_for(notifier)
+      end
+    end
+
+    # This class is a registry which holds all of the +Instrumenter+ objects
+    # in a particular thread local. To access the +Instrumenter+ object for a
+    # particular +notifier+, you can call the following method:
+    #
+    #   InstrumentationRegistry.instrumenter_for(notifier)
+    #
+    # The instrumenters for multiple notifiers are held in a single instance of
+    # this class.
+    class InstrumentationRegistry # :nodoc:
+      extend ActiveSupport::PerThreadRegistry
+
+      def initialize
+        @registry = {}
+      end
+
+      def instrumenter_for(notifier)
+        @registry[notifier] ||= Instrumenter.new(notifier)
       end
     end
 

@@ -1,5 +1,6 @@
 require "cases/helper"
 require 'models/developer'
+require 'models/computer'
 require 'models/project'
 require 'models/company'
 require 'models/ship'
@@ -7,6 +8,7 @@ require 'models/pirate'
 require 'models/car'
 require 'models/bulb'
 require 'models/author'
+require 'models/image'
 require 'models/post'
 
 class HasOneAssociationsTest < ActiveRecord::TestCase
@@ -20,6 +22,13 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
   def test_has_one
     assert_equal companies(:first_firm).account, Account.find(1)
     assert_equal Account.find(1).credit_limit, companies(:first_firm).account.credit_limit
+  end
+
+  def test_has_one_does_not_use_order_by
+    ActiveRecord::SQLCounter.clear_log
+    companies(:first_firm).account
+  ensure
+    assert ActiveRecord::SQLCounter.log_all.all? { |sql| /order by/i !~ sql }, 'ORDER BY was used in the query'
   end
 
   def test_has_one_cache_nils
@@ -158,22 +167,6 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
     assert_nothing_raised { firm.destroy }
   end
 
-  def test_restrict
-    firm = RestrictedFirm.create!(:name => 'restrict')
-    firm.create_account(:credit_limit => 10)
-
-    assert_not_nil firm.account
-
-    assert_raise(ActiveRecord::DeleteRestrictionError) { firm.destroy }
-    assert RestrictedFirm.exists?(:name => 'restrict')
-    assert firm.account.present?
-  end
-
-  def test_restrict_is_deprecated
-    klass = Class.new(ActiveRecord::Base)
-    assert_deprecated { klass.has_one :post, dependent: :restrict }
-  end
-
   def test_restrict_with_exception
     firm = RestrictedWithExceptionFirm.create!(:name => 'restrict')
     firm.create_account(:credit_limit => 10)
@@ -209,7 +202,7 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
   end
 
   def test_build_association_dont_create_transaction
-    assert_no_queries {
+    assert_no_queries(ignore_none: false) {
       Firm.new.build_account
     }
   end
@@ -244,16 +237,16 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
 
   def test_build_and_create_should_not_happen_within_scope
     pirate = pirates(:blackbeard)
-    scoped_count = pirate.association(:foo_bulb).scope.where_values.count
+    scope = pirate.association(:foo_bulb).scope.where_values_hash
 
     bulb = pirate.build_foo_bulb
-    assert_not_equal scoped_count, bulb.scope_after_initialize.where_values.count
+    assert_not_equal scope, bulb.scope_after_initialize.where_values_hash
 
     bulb = pirate.create_foo_bulb
-    assert_not_equal scoped_count, bulb.scope_after_initialize.where_values.count
+    assert_not_equal scope, bulb.scope_after_initialize.where_values_hash
 
     bulb = pirate.create_foo_bulb!
-    assert_not_equal scoped_count, bulb.scope_after_initialize.where_values.count
+    assert_not_equal scope, bulb.scope_after_initialize.where_values_hash
   end
 
   def test_create_association
@@ -278,6 +271,14 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
     account.credit_limit = 5
     account.save
     assert_equal account, firm.reload.account
+  end
+
+  def test_create_with_inexistent_foreign_key_failing
+    firm = Firm.create(name: 'GlobalMegaCorp')
+
+    assert_raises(ActiveModel::AttributeAssignment::UnknownAttributeError) do
+      firm.create_account_with_inexistent_foreign_key
+    end
   end
 
   def test_build
@@ -418,9 +419,11 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
     pirate = pirates(:redbeard)
     new_ship = Ship.new
 
-    assert_raise(ActiveRecord::RecordNotSaved) do
+    error = assert_raise(ActiveRecord::RecordNotSaved) do
       pirate.ship = new_ship
     end
+
+    assert_equal "Failed to save the new associated ship.", error.message
     assert_nil pirate.ship
     assert_nil new_ship.pirate_id
   end
@@ -430,20 +433,25 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
     pirate.ship.name = nil
 
     assert !pirate.ship.valid?
-    assert_raise(ActiveRecord::RecordNotSaved) do
+    error = assert_raise(ActiveRecord::RecordNotSaved) do
       pirate.ship = ships(:interceptor)
     end
+
     assert_equal ships(:black_pearl), pirate.ship
     assert_equal pirate.id, pirate.ship.pirate_id
+    assert_equal "Failed to remove the existing associated ship. " +
+                 "The record failed to save after its foreign key was set to nil.", error.message
   end
 
   def test_replacement_failure_due_to_new_record_should_raise_error
     pirate = pirates(:blackbeard)
     new_ship = Ship.new
 
-    assert_raise(ActiveRecord::RecordNotSaved) do
+    error = assert_raise(ActiveRecord::RecordNotSaved) do
       pirate.ship = new_ship
     end
+
+    assert_equal "Failed to save the new associated ship.", error.message
     assert_equal ships(:black_pearl), pirate.ship
     assert_equal pirate.id, pirate.ship.pirate_id
     assert_equal pirate.id, ships(:black_pearl).reload.pirate_id
@@ -521,5 +529,82 @@ class HasOneAssociationsTest < ActiveRecord::TestCase
     assert_no_queries { company.account = nil }
     account = Account.find(2)
     assert_queries { company.account = account }
+
+    assert_no_queries { Firm.new.account = account }
+  end
+
+  def test_has_one_assignment_dont_trigger_save_on_change_of_same_object
+    pirate = Pirate.create!(catchphrase: "Don' botharrr talkin' like one, savvy?")
+    ship = pirate.build_ship(name: 'old name')
+    ship.save!
+
+    ship.name = 'new name'
+    assert ship.changed?
+    assert_queries(1) do
+      # One query for updating name, not triggering query for updating pirate_id
+      pirate.ship = ship
+    end
+
+    assert_equal 'new name', pirate.ship.reload.name
+  end
+
+  def test_has_one_assignment_triggers_save_on_change_on_replacing_object
+    pirate = Pirate.create!(catchphrase: "Don' botharrr talkin' like one, savvy?")
+    ship = pirate.build_ship(name: 'old name')
+    ship.save!
+
+    new_ship = Ship.create(name: 'new name')
+    assert_queries(2) do
+      # One query for updating name and second query for updating pirate_id
+      pirate.ship = new_ship
+    end
+
+    assert_equal 'new name', pirate.ship.reload.name
+  end
+
+  def test_has_one_autosave_with_primary_key_manually_set
+    post = Post.create(id: 1234, title: "Some title", body: 'Some content')
+    author = Author.new(id: 33, name: 'Hank Moody')
+
+    author.post = post
+    author.save
+    author.reload
+
+    assert_not_nil author.post
+    assert_equal author.post, post
+  end
+
+  def test_has_one_loading_for_new_record
+    post = Post.create!(author_id: 42, title: 'foo', body: 'bar')
+    author = Author.new(id: 42)
+    assert_equal post, author.post
+  end
+
+  def test_has_one_relationship_cannot_have_a_counter_cache
+    assert_raise(ArgumentError) do
+      Class.new(ActiveRecord::Base) do
+        has_one :thing, counter_cache: true
+      end
+    end
+  end
+
+  def test_with_polymorphic_has_one_with_custom_columns_name
+    post = Post.create! :title => 'foo', :body => 'bar'
+    image = Image.create!
+
+    post.main_image = image
+    post.reload
+
+    assert_equal image, post.main_image
+  end
+
+  test 'dangerous association name raises ArgumentError' do
+    [:errors, 'errors', :save, 'save'].each do |name|
+      assert_raises(ArgumentError, "Association #{name} should not be allowed") do
+        Class.new(ActiveRecord::Base) do
+          has_one name
+        end
+      end
+    end
   end
 end

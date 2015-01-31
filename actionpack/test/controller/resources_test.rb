@@ -4,6 +4,7 @@ require 'active_support/core_ext/object/with_options'
 require 'active_support/core_ext/array/extract_options'
 
 class ResourcesTest < ActionController::TestCase
+
   def test_default_restful_routes
     with_restful_routing :messages do
       assert_simply_restful_for :messages
@@ -42,11 +43,11 @@ class ResourcesTest < ActionController::TestCase
           :member => member_methods,
           :path_names => path_names do |options|
 
-        collection_methods.keys.each do |action|
+        collection_methods.each_key do |action|
           assert_named_route "/messages/#{path_names[action] || action}", "#{action}_messages_path", :action => action
         end
 
-        member_methods.keys.each do |action|
+        member_methods.each_key do |action|
           assert_named_route "/messages/1/#{path_names[action] || action}", "#{action}_message_path", :action => action, :id => "1"
         end
 
@@ -149,7 +150,7 @@ class ResourcesTest < ActionController::TestCase
       end
 
       assert_restful_named_routes_for :messages do |options|
-        actions.keys.each do |action|
+        actions.each_key do |action|
           assert_named_route "/messages/#{action}", "#{action}_messages_path", :action => action
         end
       end
@@ -179,7 +180,7 @@ class ResourcesTest < ActionController::TestCase
       end
 
       assert_restful_named_routes_for :messages, :path_prefix => 'threads/1/', :name_prefix => 'thread_', :options => { :thread_id => '1' } do |options|
-        actions.keys.each do |action|
+        actions.each_key do |action|
           assert_named_route "/threads/1/messages/#{action}", "#{action}_thread_messages_path", :action => action
         end
       end
@@ -206,7 +207,7 @@ class ResourcesTest < ActionController::TestCase
       end
 
       assert_restful_named_routes_for :messages, :path_prefix => 'threads/1/', :name_prefix => 'thread_', :options => { :thread_id => '1' } do |options|
-        actions.keys.each do |action|
+        actions.each_key do |action|
           assert_named_route "/threads/1/messages/#{action}", "#{action}_thread_messages_path", :action => action
         end
       end
@@ -236,7 +237,7 @@ class ResourcesTest < ActionController::TestCase
       end
 
       assert_restful_named_routes_for :messages, :path_prefix => 'threads/1/', :name_prefix => 'thread_', :options => { :thread_id => '1' } do |options|
-        actions.keys.each do |action|
+        actions.each_key do |action|
           assert_named_route "/threads/1/messages/#{action}.xml", "#{action}_thread_messages_path", :action => action, :format => 'xml'
         end
       end
@@ -1004,7 +1005,7 @@ class ResourcesTest < ActionController::TestCase
         end
       end
 
-      assert_resource_allowed_routes('images', { :product_id => '1' },                    { :id => '2' }, [:index, :new, :create, :show, :edit, :update, :destory], [], 'products/1/images')
+      assert_resource_allowed_routes('images', { :product_id => '1' },                    { :id => '2' }, [:index, :new, :create, :show, :edit, :update, :destroy], [], 'products/1/images')
       assert_resource_allowed_routes('images', { :product_id => '1', :format => 'xml' },  { :id => '2' }, [:index, :new, :create, :show, :edit, :update, :destroy], [], 'products/1/images')
     end
   end
@@ -1186,7 +1187,7 @@ class ResourcesTest < ActionController::TestCase
       @controller.singleton_class.send(:include, @routes.url_helpers)
       @request    = ActionController::TestRequest.new
       @response   = ActionController::TestResponse.new
-      get :index, options[:options]
+      get :index, params: options[:options]
       options[:options].delete :action
 
       path = "#{options[:as] || controller_name}"
@@ -1256,7 +1257,7 @@ class ResourcesTest < ActionController::TestCase
       @controller.singleton_class.send(:include, @routes.url_helpers)
       @request    = ActionController::TestRequest.new
       @response   = ActionController::TestResponse.new
-      get :show, options[:options]
+      get :show, params: options[:options]
       options[:options].delete :action
 
       full_path = "/#{options[:path_prefix]}#{options[:as] || singleton_name}"
@@ -1320,6 +1321,8 @@ class ResourcesTest < ActionController::TestCase
         assert_recognizes options, path_options
       elsif Array(not_allowed).include?(action)
         assert_not_recognizes options, path_options
+      else
+        raise Assertion, 'Invalid Action has passed'
       end
     end
 

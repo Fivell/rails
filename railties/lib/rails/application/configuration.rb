@@ -1,18 +1,19 @@
 require 'active_support/core_ext/kernel/reporting'
 require 'active_support/file_update_checker'
 require 'rails/engine/configuration'
+require 'rails/source_annotation_extractor'
 
 module Rails
   class Application
     class Configuration < ::Rails::Engine::Configuration
-      attr_accessor :asset_host, :assets, :autoflush_log,
+      attr_accessor :allow_concurrency, :asset_host, :autoflush_log,
                     :cache_classes, :cache_store, :consider_all_requests_local, :console,
                     :eager_load, :exceptions_app, :file_watcher, :filter_parameters,
                     :force_ssl, :helpers_paths, :logger, :log_formatter, :log_tags,
                     :railties_order, :relative_url_root, :secret_key_base, :secret_token,
-                    :serve_static_assets, :ssl_options, :static_cache_control, :session_options,
+                    :serve_static_files, :ssl_options, :static_cache_control, :session_options,
                     :time_zone, :reload_classes_only_on_change,
-                    :beginning_of_week, :filter_redirect
+                    :beginning_of_week, :filter_redirect, :x
 
       attr_writer :log_level
       attr_reader :encoding
@@ -20,11 +21,12 @@ module Rails
       def initialize(*)
         super
         self.encoding = "utf-8"
+        @allow_concurrency             = nil
         @consider_all_requests_local   = false
         @filter_parameters             = []
         @filter_redirect               = []
         @helpers_paths                 = []
-        @serve_static_assets           = true
+        @serve_static_files            = true
         @static_cache_control          = nil
         @force_ssl                     = false
         @ssl_options                   = {}
@@ -46,22 +48,7 @@ module Rails
         @eager_load                    = nil
         @secret_token                  = nil
         @secret_key_base               = nil
-
-        @assets = ActiveSupport::OrderedOptions.new
-        @assets.enabled                  = true
-        @assets.paths                    = []
-        @assets.precompile               = [ Proc.new { |path, fn| fn =~ /app\/assets/ && !%w(.js .css).include?(File.extname(path)) },
-                                             /(?:\/|\\|\A)application\.(css|js)$/ ]
-        @assets.prefix                   = "/assets"
-        @assets.version                  = '1.0'
-        @assets.debug                    = false
-        @assets.compile                  = true
-        @assets.digest                   = false
-        @assets.cache_store              = [ :file_store, "#{root}/tmp/cache/assets/#{Rails.env}/" ]
-        @assets.js_compressor            = nil
-        @assets.css_compressor           = nil
-        @assets.initialize_on_precompile = true
-        @assets.logger                   = nil
+        @x                             = Custom.new
       end
 
       def encoding=(value)
@@ -76,6 +63,7 @@ module Rails
         @paths ||= begin
           paths = super
           paths.add "config/database",    with: "config/database.yml"
+          paths.add "config/secrets",     with: "config/secrets.yml"
           paths.add "config/environment", with: "config/environment.rb"
           paths.add "lib/templates"
           paths.add "log",                with: "log/#{Rails.env}.log"
@@ -87,30 +75,35 @@ module Rails
         end
       end
 
-      def threadsafe!
-        message = "config.threadsafe! is deprecated. Rails applications " \
-                  "behave by default as thread safe in production as long as config.cache_classes and " \
-                  "config.eager_load are set to true"
-        ActiveSupport::Deprecation.warn message
-        @cache_classes = true
-        @eager_load = true
-        self
-      end
-
-      # Loads and returns the contents of the #database_configuration_file. The
-      # contents of the file are processed via ERB before being sent through
-      # YAML::load.
+      # Loads and returns the entire raw configuration of database from
+      # values stored in `config/database.yml`.
       def database_configuration
-        require 'erb'
-        YAML.load ERB.new(IO.read(paths["config/database"].first)).result
+        path = paths["config/database"].existent.first
+        yaml = Pathname.new(path) if path
+
+        config = if yaml && yaml.exist?
+          require "yaml"
+          require "erb"
+          YAML.load(ERB.new(yaml.read).result) || {}
+        elsif ENV['DATABASE_URL']
+          # Value from ENV['DATABASE_URL'] is set to default database connection
+          # by Active Record.
+          {}
+        else
+          raise "Could not load database configuration. No such file - #{paths["config/database"].instance_variable_get(:@paths)}"
+        end
+
+        config
       rescue Psych::SyntaxError => e
         raise "YAML syntax error occurred while parsing #{paths["config/database"].first}. " \
               "Please note that YAML must be consistently indented using spaces. Tabs are not allowed. " \
               "Error: #{e.message}"
+      rescue => e
+        raise e, "Cannot load `Rails.application.database_configuration`:\n#{e.message}", e.backtrace
       end
 
       def log_level
-        @log_level ||= Rails.env.production? ? :info : :debug
+        @log_level ||= (Rails.env.production? ? :info : :debug)
       end
 
       def colorize_logging
@@ -145,9 +138,26 @@ module Rails
         end
       end
 
-      def whiny_nils=(*)
-        ActiveSupport::Deprecation.warn "config.whiny_nils option is deprecated and no longer works"
+      def annotations
+        SourceAnnotationExtractor::Annotation
       end
+
+      private
+        class Custom #:nodoc:
+          def initialize
+            @configurations = Hash.new
+          end
+
+          def method_missing(method, *args)
+            if method =~ /=$/
+              @configurations[$`.to_sym] = args.first
+            else
+              @configurations.fetch(method) {
+                @configurations[method] = ActiveSupport::OrderedOptions.new
+              }
+            end
+          end
+        end
     end
   end
 end

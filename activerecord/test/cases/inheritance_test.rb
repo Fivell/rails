@@ -1,10 +1,11 @@
-require "cases/helper"
+require 'cases/helper'
 require 'models/company'
 require 'models/person'
 require 'models/post'
 require 'models/project'
 require 'models/subscriber'
 require 'models/vegetables'
+require 'models/shop'
 
 class InheritanceTest < ActiveRecord::TestCase
   fixtures :companies, :projects, :subscribers, :accounts, :vegetables
@@ -21,7 +22,7 @@ class InheritanceTest < ActiveRecord::TestCase
     company = Company.first
     company = company.dup
     company.extend(Module.new {
-      def read_attribute(name)
+      def _read_attribute(name)
         return '  ' if name == 'type'
         super
       end
@@ -68,6 +69,7 @@ class InheritanceTest < ActiveRecord::TestCase
   end
 
   def test_company_descends_from_active_record
+    assert !ActiveRecord::Base.descends_from_active_record?
     assert AbstractCompany.descends_from_active_record?, 'AbstractCompany should descend from ActiveRecord::Base'
     assert Company.descends_from_active_record?, 'Company should descend from ActiveRecord::Base'
     assert !Class.new(Company).descends_from_active_record?, 'Company subclass should not descend from ActiveRecord::Base'
@@ -93,16 +95,8 @@ class InheritanceTest < ActiveRecord::TestCase
   end
 
   def test_a_bad_type_column
-    #SQLServer need to turn Identity Insert On before manually inserting into the Identity column
-    if current_adapter?(:SybaseAdapter)
-      Company.connection.execute "SET IDENTITY_INSERT companies ON"
-    end
     Company.connection.insert "INSERT INTO companies (id, #{QUOTED_TYPE}, name) VALUES(100, 'bad_class!', 'Not happening')"
 
-    #We then need to turn it back Off before continuing.
-    if current_adapter?(:SybaseAdapter)
-      Company.connection.execute "SET IDENTITY_INSERT companies OFF"
-    end
     assert_raise(ActiveRecord::SubclassNotFound) { Company.find(100) }
   end
 
@@ -125,6 +119,17 @@ class InheritanceTest < ActiveRecord::TestCase
     assert_kind_of Vegetable, vegetable
     cabbage = vegetable.becomes(Cabbage)
     assert_kind_of Cabbage, cabbage
+  end
+
+  def test_alt_becomes_bang_resets_inheritance_type_column
+    vegetable = Vegetable.create!(name: "Red Pepper")
+    assert_nil vegetable.custom_type
+
+    cabbage = vegetable.becomes!(Cabbage)
+    assert_equal "Cabbage", cabbage.custom_type
+
+    vegetable = cabbage.becomes!(Vegetable)
+    assert_nil cabbage.custom_type
   end
 
   def test_inheritance_find_all
@@ -171,6 +176,20 @@ class InheritanceTest < ActiveRecord::TestCase
     assert_equal Firm, firm.class
   end
 
+  def test_new_with_abstract_class
+    e = assert_raises(NotImplementedError) do
+      AbstractCompany.new
+    end
+    assert_equal("AbstractCompany is an abstract class and cannot be instantiated.", e.message)
+  end
+
+  def test_new_with_ar_base
+    e = assert_raises(NotImplementedError) do
+      ActiveRecord::Base.new
+    end
+    assert_equal("ActiveRecord::Base is an abstract class and cannot be instantiated.", e.message)
+  end
+
   def test_new_with_invalid_type
     assert_raise(ActiveRecord::SubclassNotFound) { Company.new(:type => 'InvalidType') }
   end
@@ -179,10 +198,25 @@ class InheritanceTest < ActiveRecord::TestCase
     assert_raise(ActiveRecord::SubclassNotFound) { Company.new(:type => 'Account') }
   end
 
+  def test_new_with_complex_inheritance
+    assert_nothing_raised { Client.new(type: 'VerySpecialClient') }
+  end
+
+  def test_new_with_autoload_paths
+    path = File.expand_path('../../models/autoloadable', __FILE__)
+    ActiveSupport::Dependencies.autoload_paths << path
+
+    firm = Company.new(:type => 'ExtraFirm')
+    assert_equal ExtraFirm, firm.class
+  ensure
+    ActiveSupport::Dependencies.autoload_paths.reject! { |p| p == path }
+    ActiveSupport::Dependencies.clear
+  end
+
   def test_inheritance_condition
-    assert_equal 10, Company.count
+    assert_equal 11, Company.count
     assert_equal 2, Firm.count
-    assert_equal 4, Client.count
+    assert_equal 5, Client.count
   end
 
   def test_alt_inheritance_condition
@@ -260,17 +294,17 @@ class InheritanceTest < ActiveRecord::TestCase
 
   def test_eager_load_belongs_to_something_inherited
     account = Account.all.merge!(:includes => :firm).find(1)
-    assert account.association_cache.key?(:firm), "nil proves eager load failed"
+    assert account.association(:firm).loaded?, "association was not eager loaded"
   end
 
   def test_alt_eager_loading
     cabbage = RedCabbage.all.merge!(:includes => :seller).find(4)
-    assert cabbage.association_cache.key?(:seller), "nil proves eager load failed"
+    assert cabbage.association(:seller).loaded?, "association was not eager loaded"
   end
 
   def test_eager_load_belongs_to_primary_key_quoting
     con = Account.connection
-    assert_sql(/#{con.quote_table_name('companies')}.#{con.quote_column_name('id')} IN \(1\)/) do
+    assert_sql(/#{con.quote_table_name('companies')}.#{con.quote_column_name('id')} = 1/) do
       Account.all.merge!(:includes => :firm).find(1)
     end
   end
@@ -283,8 +317,12 @@ class InheritanceTest < ActiveRecord::TestCase
     assert_kind_of SpecialSubscriber, SpecialSubscriber.find("webster132")
     assert_nothing_raised { s = SpecialSubscriber.new("name" => "And breaaaaathe!"); s.id = 'roger'; s.save }
   end
-end
 
+  def test_scope_inherited_properly
+    assert_nothing_raised { Company.of_first_firm }
+    assert_nothing_raised { Client.of_first_firm }
+  end
+end
 
 class InheritanceComputeTypeTest < ActiveRecord::TestCase
   fixtures :companies
@@ -293,7 +331,7 @@ class InheritanceComputeTypeTest < ActiveRecord::TestCase
     ActiveSupport::Dependencies.log_activity = true
   end
 
-  def teardown
+  teardown do
     ActiveSupport::Dependencies.log_activity = false
     self.class.const_remove :FirmOnTheFly rescue nil
     Firm.const_remove :FirmOnTheFly rescue nil
@@ -321,5 +359,11 @@ class InheritanceComputeTypeTest < ActiveRecord::TestCase
     assert_nothing_raised { assert_kind_of Firm::FirmOnTheFly, Firm.find(foo.id) }
   ensure
     ActiveRecord::Base.store_full_sti_class = true
+  end
+
+  def test_sti_type_from_attributes_disabled_in_non_sti_class
+    phone = Shop::Product::Type.new(name: 'Phone')
+    product = Shop::Product.new(:type => phone)
+    assert product.save
   end
 end

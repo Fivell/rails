@@ -1,123 +1,70 @@
-## Rails 4.0.0 (unreleased) ##
+*   Assigning an unknown attribute key to an `ActiveModel` instance during initialization
+    will now raise `ActiveModel::AttributeAssignment::UnknownAttributeError` instead of
+    `NoMethodError`
 
-*   Add `ActiveModel::Validations::AbsenceValidator`, a validator to check the
-    absence of attributes.
+    Example:
 
-        class Person
-          include ActiveModel::Validations
+        User.new(foo: 'some value')
+        # => ActiveModel::AttributeAssignment::UnknownAttributeError: unknown attribute 'foo' for User.
 
-          attr_accessor :first_name
-          validates_absence_of :first_name
+    *Eugene Gilburg*
+
+*   Extracted `ActiveRecord::AttributeAssignment` to `ActiveModel::AttributeAssignment`
+    allowing to use it for any object as an includable module.
+
+    Example:
+
+        class Cat
+          include ActiveModel::AttributeAssignment
+          attr_accessor :name, :status
         end
 
-        person = Person.new
-        person.first_name = "John"
-        person.valid?
-        # => false
-        person.errors.messages
-        # => {:first_name=>["must be blank"]}
-
-    *Roberto Vasquez Angel*
-
-*   `[attribute]_changed?` now returns `false` after a call to `reset_[attribute]!`
-
-    *Renato Mascarenhas*
-
-*   Observers was extracted from Active Model as `rails-observers` gem.
-
-    *Rafael Mendonça França*
-
-*   Specify type of singular association during serialization *Steve Klabnik*
-
-*   Fixed length validator to correctly handle nil values. Fixes #7180.
-
-    *Michal Zima*
-
-*   Removed dispensable `require` statements. Make sure to require `active_model` before requiring
-    individual parts of the framework.
-
-    *Yves Senn*
-
-*   Use BCrypt's `MIN_COST` in the test environment for speedier tests when using `has_secure_pasword`.
-
-    *Brian Cardarella + Jeremy Kemper + Trevor Turk*
-
-*   Add `ActiveModel::ForbiddenAttributesProtection`, a simple module to
-    protect attributes from mass assignment when non-permitted attributes are passed.
-
-    *DHH + Guillermo Iguaran*
-
-*   `ActiveModel::MassAssignmentSecurity` has been extracted from Active Model and the
-    `protected_attributes` gem should be added to Gemfile in order to use
-    `attr_accessible` and `attr_protected` macros in your models.
-
-    *Guillermo Iguaran*
-
-*   Due to a change in builder, nil values and empty strings now generates
-    closed tags, so instead of this:
-
-        <pseudonyms nil=\"true\"></pseudonyms>
-
-    It generates this:
-
-        <pseudonyms nil=\"true\"/>
-
-    *Carlos Antonio da Silva*
-
-*   Changed inclusion and exclusion validators to accept a symbol for `:in` option.
-
-    This allows to use dynamic inclusion/exclusion values using methods, besides the current lambda/proc support.
-
-    *Gabriel Sobrinho*
-
-*   `AM::Validation#validates` ability to pass custom exception to `:strict` option.
+        cat = Cat.new
+        cat.assign_attributes(name: "Gorby", status: "yawning")
+        cat.name # => 'Gorby'
+        cat.status => 'yawning'
+        cat.assign_attributes(status: "sleeping")
+        cat.name # => 'Gorby'
+        cat.status => 'sleeping'
 
     *Bogdan Gusiev*
 
-*   Changed `ActiveModel::Serializers::Xml::Serializer#add_associations` to by default
-    propagate `:skip_types, :dasherize, :camelize` keys to included associations.
-    It can be overriden on each association by explicitly specifying the option on one
-    or more associations
+*   Add `ActiveModel::Errors#details`
 
-    *Anthony Alberto*
+    To be able to return type of used validator, one can now call `details`
+    on errors instance.
 
-*   Changed `AM::Serializers::JSON.include_root_in_json' default value to false.
-    Now, AM Serializers and AR objects have the same default behaviour. Fixes #6578.
+    Example:
 
-        class User < ActiveRecord::Base; end
-
-        class Person
-          include ActiveModel::Model
-          include ActiveModel::AttributeMethods
-          include ActiveModel::Serializers::JSON
-
-          attr_accessor :name, :age
-
-          def attributes
-            instance_values
-          end
+        class User < ActiveRecord::Base
+          validates :name, presence: true
         end
 
-        user.as_json
-        => {"id"=>1, "name"=>"Konata Izumi", "age"=>16, "awesome"=>true}
-        # root is not included
+        user = User.new; user.valid?; user.errors.details
+        => {name: [{error: :blank}]}
 
-        person.as_json
-        => {"name"=>"Francesco", "age"=>22}
-        # root is not included
+    *Wojciech Wnętrzak*
 
-    *Francesco Rodriguez*
+*   Change validates_acceptance_of to accept true by default.
 
-*   Passing false hash values to `validates` will no longer enable the corresponding validators *Steve Purcell*
+    The default for validates_acceptance_of is now "1" and true.
+    In the past, only "1" was the default and you were required to add
+    accept: true.
 
-*   `ConfirmationValidator` error messages will attach to `:#{attribute}_confirmation` instead of `attribute` *Brian Cardarella*
+*   Remove deprecated `ActiveModel::Dirty#reset_#{attribute}` and
+    `ActiveModel::Dirty#reset_changes`.
 
-*   Added ActiveModel::Model, a mixin to make Ruby objects work with AP out of box *Guillermo Iguaran*
+    *Rafael Mendonça França*
 
-*   `AM::Errors#to_json`: support `:full_messages` parameter *Bogdan Gusiev*
+*   Change the way in which callback chains can be halted.
 
-*   Trim down Active Model API by removing `valid?` and `errors.full_messages` *José Valim*
+    The preferred method to halt a callback chain from now on is to explicitly
+    `throw(:abort)`.
+    In the past, returning `false` in an ActiveModel or ActiveModel::Validations
+    `before_` callback had the side effect of halting the callback chain.
+    This is not recommended anymore and, depending on the value of the
+    `config.active_support.halt_callback_chains_on_return_false` option, will
+    either not work at all or display a deprecation warning.
 
-*   When `^` or `$` are used in the regular expression provided to `validates_format_of` and the :multiline option is not set to true, an exception will be raised. This is to prevent security vulnerabilities when using `validates_format_of`. The problem is described in detail in the Rails security guide *Jan Berdajs + Egor Homakov*
 
-Please check [3-2-stable](https://github.com/rails/rails/blob/3-2-stable/activemodel/CHANGELOG.md) for previous changes.
+Please check [4-2-stable](https://github.com/rails/rails/blob/4-2-stable/activemodel/CHANGELOG.md) for previous changes.

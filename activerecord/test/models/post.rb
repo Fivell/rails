@@ -1,4 +1,10 @@
 class Post < ActiveRecord::Base
+  class CategoryPost < ActiveRecord::Base
+    self.table_name = "categories_posts"
+    belongs_to :category
+    belongs_to :post
+  end
+
   module NamedExtension
     def author
       'lifo'
@@ -12,6 +18,7 @@ class Post < ActiveRecord::Base
   end
 
   scope :containing_the_letter_a, -> { where("body LIKE '%a%'") }
+  scope :titled_with_an_apostrophe, -> { where("title LIKE '%''%'") }
   scope :ranked_by_comments,      -> { order("comments_count DESC") }
 
   scope :limit_by, lambda {|l| limit(l) }
@@ -33,6 +40,11 @@ class Post < ActiveRecord::Base
 
   scope :with_comments, -> { preload(:comments) }
   scope :with_tags, -> { preload(:taggings) }
+
+  scope :tagged_with, ->(id) { joins(:taggings).where(taggings: { tag_id: id }) }
+  scope :tagged_with_comment, ->(comment) { joins(:taggings).where(taggings: { comment: comment }) }
+
+  scope :typographically_interesting, -> { containing_the_letter_a.or(titled_with_an_apostrophe) }
 
   has_many   :comments do
     def find_most_recent
@@ -59,23 +71,25 @@ class Post < ActiveRecord::Base
   has_many :author_favorites, :through => :author
   has_many :author_categorizations, :through => :author, :source => :categorizations
   has_many :author_addresses, :through => :author
-
-  has_many :comments_with_interpolated_conditions,
-    ->(p) { where "#{"#{p.aliased_table_name}." rescue ""}body = ?", 'Thank you for the welcome' },
-    :class_name => 'Comment'
+  has_many :author_address_extra_with_address,
+    through: :author_with_address,
+    source: :author_address_extra
 
   has_one  :very_special_comment
   has_one  :very_special_comment_with_post, -> { includes(:post) }, :class_name => "VerySpecialComment"
+  has_one :very_special_comment_with_post_with_joins, -> { joins(:post).order('posts.id') }, class_name: "VerySpecialComment"
   has_many :special_comments
-  has_many :nonexistant_comments, -> { where 'comments.id < 0' }, :class_name => 'Comment'
+  has_many :nonexistent_comments, -> { where 'comments.id < 0' }, :class_name => 'Comment'
 
   has_many :special_comments_ratings, :through => :special_comments, :source => :ratings
   has_many :special_comments_ratings_taggings, :through => :special_comments_ratings, :source => :taggings
 
+  has_many :category_posts, :class_name => 'CategoryPost'
+  has_many :scategories, through: :category_posts, source: :category
   has_and_belongs_to_many :categories
   has_and_belongs_to_many :special_categories, :join_table => "categories_posts", :association_foreign_key => 'category_id'
 
-  has_many :taggings, :as => :taggable
+  has_many :taggings, :as => :taggable, :counter_cache => :tags_count
   has_many :tags, :through => :taggings do
     def add_joins_and_select
       select('tags.*, authors.id as author_id')
@@ -113,6 +127,9 @@ class Post < ActiveRecord::Base
   has_many :taggings_using_author_id, :primary_key => :author_id, :as => :taggable, :class_name => 'Tagging'
   has_many :tags_using_author_id, :through => :taggings_using_author_id, :source => :tag
 
+  has_many :images, :as => :imageable, :foreign_key => :imageable_identifier, :foreign_type => :imageable_class
+  has_one :main_image, :as => :imageable, :foreign_key => :imageable_identifier, :foreign_type => :imageable_class, :class_name => 'Image'
+
   has_many :standard_categorizations, :class_name => 'Categorization', :foreign_key => :post_id
   has_many :author_using_custom_pk,  :through => :standard_categorizations
   has_many :authors_using_custom_pk, :through => :standard_categorizations
@@ -122,7 +139,6 @@ class Post < ActiveRecord::Base
   has_many :secure_readers
   has_many :readers_with_person, -> { includes(:person) }, :class_name => "Reader"
   has_many :people, :through => :readers
-  has_many :secure_people, :through => :secure_readers
   has_many :single_people, :through => :readers
   has_many :people_with_callbacks, :source=>:person, :through => :readers,
               :before_add    => lambda {|owner, reader| log(:added,   :before, reader.first_name) },
@@ -135,8 +151,16 @@ class Post < ActiveRecord::Base
   has_many :lazy_readers
   has_many :lazy_readers_skimmers_or_not, -> { where(skimmer: [ true, false ]) }, :class_name => 'LazyReader'
 
+  has_many :lazy_people, :through => :lazy_readers, :source => :person
+  has_many :lazy_readers_unscope_skimmers, -> { skimmers_or_not }, :class_name => 'LazyReader'
+  has_many :lazy_people_unscope_skimmers, :through => :lazy_readers_unscope_skimmers, :source => :person
+
   def self.top(limit)
     ranked_by_comments.limit_by(limit)
+  end
+
+  def self.written_by(author)
+    where(id: author.posts.pluck(:id))
   end
 
   def self.reset_log
@@ -146,10 +170,6 @@ class Post < ActiveRecord::Base
   def self.log(message=nil, side=nil, new_record=nil)
     return @log if message.nil?
     @log << [message, side, new_record]
-  end
-
-  def self.what_are_you
-    'a post...'
   end
 end
 
@@ -191,4 +211,32 @@ end
 class SpecialPostWithDefaultScope < ActiveRecord::Base
   self.table_name = 'posts'
   default_scope { where(:id => [1, 5,6]) }
+end
+
+class PostThatLoadsCommentsInAnAfterSaveHook < ActiveRecord::Base
+  self.table_name = 'posts'
+  has_many :comments, class_name: "CommentThatAutomaticallyAltersPostBody", foreign_key: :post_id
+
+  after_save do |post|
+    post.comments.load
+  end
+end
+
+class PostWithAfterCreateCallback < ActiveRecord::Base
+  self.table_name = 'posts'
+  has_many :comments, foreign_key: :post_id
+
+  after_create do |post|
+    update_attribute(:author_id, comments.first.id)
+  end
+end
+
+class PostWithCommentWithDefaultScopeReferencesAssociation < ActiveRecord::Base
+  self.table_name = 'posts'
+  has_many :comment_with_default_scope_references_associations, foreign_key: :post_id
+  has_one :first_comment, class_name: "CommentWithDefaultScopeReferencesAssociation", foreign_key: :post_id
+end
+
+class SerializedPost < ActiveRecord::Base
+  serialize :title
 end

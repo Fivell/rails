@@ -5,13 +5,13 @@ module ActiveRecord #:nodoc:
     include ActiveModel::Serializers::JSON
 
     included do
-      self.include_root_in_json = true
+      self.include_root_in_json = false
     end
 
     def serializable_hash(options = nil)
       options = options.try(:clone) || {}
 
-      options[:except] = Array(options[:except]).map { |n| n.to_s }
+      options[:except] = Array(options[:except]).map(&:to_s)
       options[:except] |= Array(self.class.inheritance_column)
 
       super(options)

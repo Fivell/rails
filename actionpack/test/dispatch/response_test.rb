@@ -1,4 +1,6 @@
 require 'abstract_unit'
+require 'timeout'
+require 'rack/content_length'
 
 class ResponseTest < ActiveSupport::TestCase
   def setup
@@ -178,12 +180,12 @@ class ResponseTest < ActiveSupport::TestCase
   end
 
   test "read x_frame_options, x_content_type_options and x_xss_protection" do
+    original_default_headers = ActionDispatch::Response.default_headers
     begin
       ActionDispatch::Response.default_headers = {
         'X-Frame-Options' => 'DENY',
         'X-Content-Type-Options' => 'nosniff',
-        'X-XSS-Protection' => '1;',
-        'X-UA-Compatible' => 'chrome=1'
+        'X-XSS-Protection' => '1;'
       }
       resp = ActionDispatch::Response.new.tap { |response|
         response.body = 'Hello'
@@ -193,13 +195,13 @@ class ResponseTest < ActiveSupport::TestCase
       assert_equal('DENY', resp.headers['X-Frame-Options'])
       assert_equal('nosniff', resp.headers['X-Content-Type-Options'])
       assert_equal('1;', resp.headers['X-XSS-Protection'])
-      assert_equal('chrome=1', resp.headers['X-UA-Compatible'])
     ensure
-      ActionDispatch::Response.default_headers = nil
+      ActionDispatch::Response.default_headers = original_default_headers
     end
   end
 
   test "read custom default_header" do
+    original_default_headers = ActionDispatch::Response.default_headers
     begin
       ActionDispatch::Response.default_headers = {
         'X-XX-XXXX' => 'Here is my phone number'
@@ -211,8 +213,43 @@ class ResponseTest < ActiveSupport::TestCase
 
       assert_equal('Here is my phone number', resp.headers['X-XX-XXXX'])
     ensure
-      ActionDispatch::Response.default_headers = nil
+      ActionDispatch::Response.default_headers = original_default_headers
     end
+  end
+
+  test "respond_to? accepts include_private" do
+    assert_not @response.respond_to?(:method_missing)
+    assert @response.respond_to?(:method_missing, true)
+  end
+
+  test "can be explicitly destructured into status, headers and an enumerable body" do
+    response = ActionDispatch::Response.new(404, { 'Content-Type' => 'text/plain' }, ['Not Found'])
+    status, headers, body = *response
+
+    assert_equal 404, status
+    assert_equal({ 'Content-Type' => 'text/plain' }, headers)
+    assert_equal ['Not Found'], body.each.to_a
+  end
+
+  test "[response.to_a].flatten does not recurse infinitely" do
+    Timeout.timeout(1) do # use a timeout to prevent it stalling indefinitely
+      status, headers, body = [@response.to_a].flatten
+      assert_equal @response.status, status
+      assert_equal @response.headers, headers
+      assert_equal @response.body, body.each.to_a.join
+    end
+  end
+
+  test "compatibility with Rack::ContentLength" do
+    @response.body = 'Hello'
+    app = lambda { |env| @response.to_a }
+    env = Rack::MockRequest.env_for("/")
+
+    status, headers, body = app.call(env)
+    assert_nil headers['Content-Length']
+
+    status, headers, body = Rack::ContentLength.new(app).call(env)
+    assert_equal '5', headers['Content-Length']
   end
 end
 

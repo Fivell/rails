@@ -9,14 +9,14 @@ module ActionController
   # You can read more about each approach by clicking the modules below.
   #
   # Note: To turn off all caching, set
-  #   config.action_controller.perform_caching = false.
+  #   config.action_controller.perform_caching = false
   #
   # == \Caching stores
   #
   # All the caching stores from ActiveSupport::Cache are available to be used as backends
   # for Action Controller caching.
   #
-  # Configuration examples (MemoryStore is the default):
+  # Configuration examples (FileStore is the default):
   #
   #   config.action_controller.cache_store = :memory_store
   #   config.action_controller.cache_store = :file_store, '/path/to/cache/directory'
@@ -57,16 +57,6 @@ module ActionController
 
       config_accessor :default_static_extension
       self.default_static_extension ||= '.html'
-
-      def self.page_cache_extension=(extension)
-        ActiveSupport::Deprecation.deprecation_warning(:page_cache_extension, :default_static_extension)
-        self.default_static_extension = extension
-      end
-
-      def self.page_cache_extension
-        ActiveSupport::Deprecation.deprecation_warning(:page_cache_extension, :default_static_extension)
-        default_static_extension
-      end
 
       config_accessor :perform_caching
       self.perform_caching = true if perform_caching.nil?

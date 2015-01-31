@@ -1,7 +1,6 @@
 require 'active_support/core_ext/hash/slice'
 require 'active_support/core_ext/hash/except'
 require 'active_support/core_ext/module/anonymous'
-require 'active_support/core_ext/struct'
 require 'action_dispatch/http/mime_type'
 
 module ActionController
@@ -86,7 +85,7 @@ module ActionController
         new name, format, include, exclude, nil, nil
       end
 
-      def initialize(name, format, include, exclude, klass, model) # nodoc
+      def initialize(name, format, include, exclude, klass, model) # :nodoc:
         super
         @include_set = include
         @name_set    = name
@@ -231,7 +230,12 @@ module ActionController
     # by the metal call stack.
     def process_action(*args)
       if _wrapper_enabled?
-        wrapped_hash = _wrap_parameters request.request_parameters
+        if request.parameters[_wrapper_key].present?
+          wrapped_hash = _extract_parameters(request.parameters)
+        else
+          wrapped_hash = _wrap_parameters request.request_parameters
+        end
+
         wrapped_keys = request.request_parameters.keys
         wrapped_filtered_hash = _wrap_parameters request.filtered_parameters.slice(*wrapped_keys)
 
@@ -239,7 +243,7 @@ module ActionController
         request.parameters.merge! wrapped_hash
         request.request_parameters.merge! wrapped_hash
 
-        # This will make the wrapped hash displayed in the log file
+        # This will display the wrapped hash in the log file
         request.filtered_parameters.merge! wrapped_filtered_hash
       end
       super
@@ -247,7 +251,7 @@ module ActionController
 
     private
 
-      # Returns the wrapper key which will use to stored wrapped parameters.
+      # Returns the wrapper key which will be used to stored wrapped parameters.
       def _wrapper_key
         _wrapper_options.name
       end
@@ -259,14 +263,16 @@ module ActionController
 
       # Returns the list of parameters which will be selected for wrapped.
       def _wrap_parameters(parameters)
-        value = if include_only = _wrapper_options.include
+        { _wrapper_key => _extract_parameters(parameters) }
+      end
+
+      def _extract_parameters(parameters)
+        if include_only = _wrapper_options.include
           parameters.slice(*include_only)
         else
           exclude = _wrapper_options.exclude || []
           parameters.except(*(exclude + EXCLUDE_PARAMETERS))
         end
-
-        { _wrapper_key => value }
       end
 
       # Checks if we should perform parameters wrapping.

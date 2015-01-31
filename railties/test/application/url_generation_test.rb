@@ -12,15 +12,16 @@ module ApplicationTests
       boot_rails
       require "rails"
       require "action_controller/railtie"
+      require "action_view/railtie"
 
       class MyApp < Rails::Application
-        config.secret_key_base = "3b7cd727ee24e8444053437c36cc66c4"
+        secrets.secret_key_base = "3b7cd727ee24e8444053437c36cc66c4"
         config.session_store :cookie_store, key: "_myapp_session"
         config.active_support.deprecation = :log
         config.eager_load = false
       end
 
-      MyApp.initialize!
+      Rails.application.initialize!
 
       class ::ApplicationController < ActionController::Base
       end

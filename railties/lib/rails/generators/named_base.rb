@@ -18,6 +18,8 @@ module Rails
         parse_attributes! if respond_to?(:attributes)
       end
 
+      # Defines the template that would be used for the migration file.
+      # The arguments include the source template file, the migration filename etc.
       no_tasks do
         def template(source, *args, &block)
           inside_template do
@@ -28,7 +30,12 @@ module Rails
 
       protected
         attr_reader :file_name
-        alias :singular_name :file_name
+
+        # FIXME: We are avoiding to use alias because a bug on thor that make
+        # this method public and add it to the task list.
+        def singular_name
+          file_name
+        end
 
         # Wrap block with namespace of current application
         # if namespace exists and is not skipped
@@ -40,7 +47,7 @@ module Rails
 
         def indent(content, multiplier = 2)
           spaces = " " * multiplier
-          content = content.each_line.map {|line| line.blank? ? line : "#{spaces}#{line}" }.join
+          content.each_line.map {|line| line.blank? ? line : "#{spaces}#{line}" }.join
         end
 
         def wrap_with_namespace(content)
@@ -88,11 +95,11 @@ module Rails
         end
 
         def namespaced_path
-          @namespaced_path ||= namespace.name.split("::").map {|m| m.underscore }[0]
+          @namespaced_path ||= namespace.name.split("::").first.underscore
         end
 
         def class_name
-          (class_path + [file_name]).map!{ |m| m.camelize }.join('::')
+          (class_path + [file_name]).map!(&:camelize).join('::')
         end
 
         def human_name
@@ -138,7 +145,7 @@ module Rails
           @route_url ||= class_path.collect {|dname| "/" + dname }.join + "/" + plural_file_name
         end
 
-        # Tries to retrieve the application name or simple return application.
+        # Tries to retrieve the application name or simply return application.
         def application_name
           if defined?(Rails) && Rails.application
             Rails.application.class.name.split('::').first.underscore
@@ -149,7 +156,7 @@ module Rails
 
         def assign_names!(name) #:nodoc:
           @class_path = name.include?('/') ? name.split('/') : name.split('::')
-          @class_path.map! { |m| m.underscore }
+          @class_path.map!(&:underscore)
           @file_name = @class_path.pop
         end
 
@@ -163,6 +170,7 @@ module Rails
         def attributes_names
           @attributes_names ||= attributes.each_with_object([]) do |a, names|
             names << a.column_name
+            names << 'password_confirmation' if a.password_digest?
             names << "#{a.name}_type" if a.polymorphic?
           end
         end

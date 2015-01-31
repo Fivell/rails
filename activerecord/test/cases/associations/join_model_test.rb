@@ -326,11 +326,11 @@ class AssociationsJoinModelTest < ActiveRecord::TestCase
   end
 
   def test_belongs_to_polymorphic_with_counter_cache
-    assert_equal 1, posts(:welcome)[:taggings_count]
+    assert_equal 1, posts(:welcome)[:tags_count]
     tagging = posts(:welcome).taggings.create(:tag => tags(:general))
-    assert_equal 2, posts(:welcome, :reload)[:taggings_count]
+    assert_equal 2, posts(:welcome, :reload)[:tags_count]
     tagging.destroy
-    assert_equal 1, posts(:welcome, :reload)[:taggings_count]
+    assert_equal 1, posts(:welcome, :reload)[:tags_count]
   end
 
   def test_unavailable_through_reflection
@@ -393,18 +393,18 @@ class AssociationsJoinModelTest < ActiveRecord::TestCase
   end
 
   def test_has_many_through_polymorphic_has_one
-    assert_equal Tagging.find(1,2).sort_by { |t| t.id }, authors(:david).taggings_2
+    assert_equal Tagging.find(1,2).sort_by(&:id), authors(:david).taggings_2
   end
 
   def test_has_many_through_polymorphic_has_many
-    assert_equal taggings(:welcome_general, :thinking_general), authors(:david).taggings.uniq.sort_by { |t| t.id }
+    assert_equal taggings(:welcome_general, :thinking_general), authors(:david).taggings.distinct.sort_by(&:id)
   end
 
   def test_include_has_many_through_polymorphic_has_many
     author            = Author.includes(:taggings).find authors(:david).id
     expected_taggings = taggings(:welcome_general, :thinking_general)
     assert_no_queries do
-      assert_equal expected_taggings, author.taggings.uniq.sort_by { |t| t.id }
+      assert_equal expected_taggings, author.taggings.distinct.sort_by(&:id)
     end
   end
 
@@ -444,7 +444,7 @@ class AssociationsJoinModelTest < ActiveRecord::TestCase
   def test_has_many_through_uses_conditions_specified_on_the_has_many_association
     author = Author.first
     assert author.comments.present?
-    assert author.nonexistant_comments.blank?
+    assert author.nonexistent_comments.blank?
   end
 
   def test_has_many_through_uses_correct_attributes
@@ -464,7 +464,7 @@ class AssociationsJoinModelTest < ActiveRecord::TestCase
     assert saved_post.reload.tags(true).include?(new_tag)
 
 
-    new_post = Post.new(:title => "Association replacmenet works!", :body => "You best believe it.")
+    new_post = Post.new(:title => "Association replacement works!", :body => "You best believe it.")
     saved_tag = tags(:general)
 
     new_post.tags << saved_tag
@@ -489,7 +489,7 @@ class AssociationsJoinModelTest < ActiveRecord::TestCase
                 message = "Expected a Tag in tags collection, got #{wrong.class}.")
     assert_nil( wrong = post_thinking.taggings.detect { |t| t.class != Tagging },
                 message = "Expected a Tagging in taggings collection, got #{wrong.class}.")
-    assert_equal(count + 1, post_thinking.tags.size)
+    assert_equal(count + 1, post_thinking.reload.tags.size)
     assert_equal(count + 1, post_thinking.tags(true).size)
 
     assert_kind_of Tag, post_thinking.tags.create!(:name => 'foo')
@@ -497,7 +497,7 @@ class AssociationsJoinModelTest < ActiveRecord::TestCase
                 message = "Expected a Tag in tags collection, got #{wrong.class}.")
     assert_nil( wrong = post_thinking.taggings.detect { |t| t.class != Tagging },
                 message = "Expected a Tagging in taggings collection, got #{wrong.class}.")
-    assert_equal(count + 2, post_thinking.tags.size)
+    assert_equal(count + 2, post_thinking.reload.tags.size)
     assert_equal(count + 2, post_thinking.tags(true).size)
 
     assert_nothing_raised { post_thinking.tags.concat(Tag.create!(:name => 'abc'), Tag.create!(:name => 'def')) }
@@ -505,7 +505,7 @@ class AssociationsJoinModelTest < ActiveRecord::TestCase
                 message = "Expected a Tag in tags collection, got #{wrong.class}.")
     assert_nil( wrong = post_thinking.taggings.detect { |t| t.class != Tagging },
                 message = "Expected a Tagging in taggings collection, got #{wrong.class}.")
-    assert_equal(count + 4, post_thinking.tags.size)
+    assert_equal(count + 4, post_thinking.reload.tags.size)
     assert_equal(count + 4, post_thinking.tags(true).size)
 
     # Raises if the wrong reflection name is used to set the Edge belongs_to
@@ -554,34 +554,35 @@ class AssociationsJoinModelTest < ActiveRecord::TestCase
 
   def test_delete_associate_when_deleting_from_has_many_through
     count = posts(:thinking).tags.count
-    tags_before = posts(:thinking).tags
+    tags_before = posts(:thinking).tags.sort
     tag = Tag.create!(:name => 'doomed')
     post_thinking = posts(:thinking)
     post_thinking.tags << tag
     assert_equal(count + 1, post_thinking.taggings(true).size)
-    assert_equal(count + 1, post_thinking.tags(true).size)
+    assert_equal(count + 1, post_thinking.reload.tags(true).size)
+    assert_not_equal(tags_before, post_thinking.tags.sort)
 
     assert_nothing_raised { post_thinking.tags.delete(tag) }
     assert_equal(count, post_thinking.tags.size)
     assert_equal(count, post_thinking.tags(true).size)
     assert_equal(count, post_thinking.taggings(true).size)
-    assert_equal(tags_before.sort, post_thinking.tags.sort)
+    assert_equal(tags_before, post_thinking.tags.sort)
   end
 
   def test_delete_associate_when_deleting_from_has_many_through_with_multiple_tags
     count = posts(:thinking).tags.count
-    tags_before = posts(:thinking).tags
+    tags_before = posts(:thinking).tags.sort
     doomed = Tag.create!(:name => 'doomed')
     doomed2 = Tag.create!(:name => 'doomed2')
     quaked = Tag.create!(:name => 'quaked')
     post_thinking = posts(:thinking)
     post_thinking.tags << doomed << doomed2
-    assert_equal(count + 2, post_thinking.tags(true).size)
+    assert_equal(count + 2, post_thinking.reload.tags(true).size)
 
     assert_nothing_raised { post_thinking.tags.delete(doomed, doomed2, quaked) }
     assert_equal(count, post_thinking.tags.size)
     assert_equal(count, post_thinking.tags(true).size)
-    assert_equal(tags_before.sort, post_thinking.tags.sort)
+    assert_equal(tags_before, post_thinking.tags.sort)
   end
 
   def test_deleting_junk_from_has_many_through_should_raise_type_mismatch

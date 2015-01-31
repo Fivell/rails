@@ -1,57 +1,56 @@
-## Rails 4.0.0 (unreleased) ##
+*   Add `assert_enqueued_emails` and `assert_no_enqueued_emails`.
 
-*   Allow passing interpolations to `#default_i18n_subject`, e.g.:
+    Example:
 
-        # config/locales/en.yml
-        en:
-          user_mailer:
-            welcome:
-              subject: 'Hello, %{username}'
-
-        # app/mailers/user_mailer.rb
-        class UserMailer < ActionMailer::Base
-          def welcome(user)
-            mail(subject: default_i18n_subject(username: user.name))
+        def test_emails
+          assert_enqueued_emails 2 do
+            ContactMailer.welcome.deliver_later
+            ContactMailer.welcome.deliver_later
           end
         end
 
-    *Olek Janiszewski*
-
-*   Eager loading made to use relation's `in_clause_length` instead of host's one.
-    Fix #8474
-
-    *Boris Staal*
-
-*   Explicit multipart messages no longer set the order of the MIME parts.
-    *Nate Berkopec*
-
-*   Do not render views when mail() isn't called.
-    Fix #7761
-
-    *Yves Senn*
-
-*   Allow delivery method options to be set per mail instance *Aditya Sanghi*
-
-    If your smtp delivery settings are dynamic,
-    you can now override settings per mail instance for e.g.
-
-        def my_mailer(user,company)
-          mail to: user.email, subject: "Welcome!",
-               delivery_method_options: { user_name: company.smtp_user,
-                                          password: company.smtp_password }
+        def test_no_emails
+          assert_no_enqueued_emails do
+            # No emails enqueued here
+          end
         end
 
-    This will ensure that your default SMTP settings will be overridden
-    by the company specific ones. You only have to override the settings
-    that are dynamic and leave the static setting in your environment
-    configuration file (e.g. config/environments/production.rb)
+    *George Claghorn*
 
-*   Allow to set default Action Mailer options via `config.action_mailer.default_options=` *Robert Pankowecki*
+*   Add `_mailer` suffix to mailers created via generator, following the same
+    naming convention used in controllers and jobs.
 
-*   Raise an `ActionView::MissingTemplate` exception when no implicit template could be found. *Damien Mathieu*
+    *Carlos Souza*
 
-*   Allow callbacks to be defined in mailers similar to `ActionController::Base`. You can configure default
-    settings, headers, attachments, delivery settings or change delivery using
-    `before_filter`, `after_filter` etc. *Justin S. Leitgeb*
+*   Remove deprecate `*_path` helpers in email views.
 
-Please check [3-2-stable](https://github.com/rails/rails/blob/3-2-stable/actionmailer/CHANGELOG.md) for previous changes.
+    *Rafael Mendonça França*
+
+*   Remove deprecated `deliver` and `deliver!` methods.
+
+    *claudiob*
+
+*   Template lookup now respects default locale and I18n fallbacks.
+
+    Given the following templates:
+
+        mailer/demo.html.erb
+        mailer/demo.en.html.erb
+        mailer/demo.pt.html.erb
+
+    Before this change, for a locale that doesn't have its associated file, the
+    `mailer/demo.html.erb` would be rendered even if `en` was the default locale.
+
+    Now `mailer/demo.en.html.erb` has precedence over the file without locale.
+
+    Also, it is possible to give a fallback.
+
+        mailer/demo.pt.html.erb
+        mailer/demo.pt-BR.html.erb
+
+    So if the locale is `pt-PT`, `mailer/demo.pt.html.erb` will be rendered given
+    the right I18n fallback configuration.
+
+    *Rafael Mendonça França*
+
+Please check [4-2-stable](https://github.com/rails/rails/blob/4-2-stable/actionmailer/CHANGELOG.md) for previous changes.

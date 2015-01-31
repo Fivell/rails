@@ -3,11 +3,11 @@ module ActiveRecord
     IGNORE_PAYLOAD_NAMES = ["SCHEMA", "EXPLAIN"]
 
     def self.runtime=(value)
-      Thread.current[:active_record_sql_runtime] = value
+      ActiveRecord::RuntimeRegistry.sql_runtime = value
     end
 
     def self.runtime
-      Thread.current[:active_record_sql_runtime] ||= 0
+      ActiveRecord::RuntimeRegistry.sql_runtime ||= 0
     end
 
     def self.reset_runtime
@@ -17,19 +17,17 @@ module ActiveRecord
 
     def initialize
       super
-      @odd_or_even = false
+      @odd = false
     end
 
-    def render_bind(column, value)
-      if column
-        if column.binary?
-          value = "<#{value.bytesize} bytes of binary data>"
-        end
-
-        [column.name, value]
+    def render_bind(attribute)
+      value = if attribute.type.binary? && attribute.value
+        "<#{attribute.value.bytesize} bytes of binary data>"
       else
-        [nil, value]
+        attribute.value_for_database
       end
+
+      [attribute.name, value]
     end
 
     def sql(event)
@@ -41,13 +39,11 @@ module ActiveRecord
       return if IGNORE_PAYLOAD_NAMES.include?(payload[:name])
 
       name  = "#{payload[:name]} (#{event.duration.round(1)}ms)"
-      sql   = payload[:sql].squeeze(' ')
+      sql   = payload[:sql]
       binds = nil
 
       unless (payload[:binds] || []).empty?
-        binds = "  " + payload[:binds].map { |col,v|
-          render_bind(col, v)
-        }.inspect
+        binds = "  " + payload[:binds].map { |attr| render_bind(attr) }.inspect
       end
 
       if odd?
@@ -60,17 +56,8 @@ module ActiveRecord
       debug "  #{name}  #{sql}#{binds}"
     end
 
-    def identity(event)
-      return unless logger.debug?
-
-      name = color(event.payload[:name], odd? ? CYAN : MAGENTA, true)
-      line = odd? ? color(event.payload[:line], nil, true) : event.payload[:line]
-
-      debug "  #{name}  #{line}"
-    end
-
     def odd?
-      @odd_or_even = !@odd_or_even
+      @odd = !@odd
     end
 
     def logger

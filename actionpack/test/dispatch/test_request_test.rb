@@ -18,7 +18,7 @@ class TestRequestTest < ActiveSupport::TestCase
     assert_equal "0.0.0.0", env.delete("REMOTE_ADDR")
     assert_equal "Rails Testing", env.delete("HTTP_USER_AGENT")
 
-    assert_equal [1, 2], env.delete("rack.version")
+    assert_equal [1, 3], env.delete("rack.version")
     assert_equal "", env.delete("rack.input").string
     assert_kind_of StringIO, env.delete("rack.errors")
     assert_equal true, env.delete("rack.multithread")
@@ -60,6 +60,36 @@ class TestRequestTest < ActiveSupport::TestCase
     req = ActionDispatch::TestRequest.new
 
     assert_equal false, req.env.empty?
+  end
+
+  test "default remote address is 0.0.0.0" do
+    req = ActionDispatch::TestRequest.new
+    assert_equal '0.0.0.0', req.remote_addr
+  end
+
+  test "allows remote address to be overridden" do
+    req = ActionDispatch::TestRequest.new('REMOTE_ADDR' => '127.0.0.1')
+    assert_equal '127.0.0.1', req.remote_addr
+  end
+
+  test "default host is test.host" do
+    req = ActionDispatch::TestRequest.new
+    assert_equal 'test.host', req.host
+  end
+
+  test "allows host to be overridden" do
+    req = ActionDispatch::TestRequest.new('HTTP_HOST' => 'www.example.com')
+    assert_equal 'www.example.com', req.host
+  end
+
+  test "default user agent is 'Rails Testing'" do
+    req = ActionDispatch::TestRequest.new
+    assert_equal 'Rails Testing', req.user_agent
+  end
+
+  test "allows user agent to be overridden" do
+    req = ActionDispatch::TestRequest.new('HTTP_USER_AGENT' => 'GoogleBot')
+    assert_equal 'GoogleBot', req.user_agent
   end
 
   private

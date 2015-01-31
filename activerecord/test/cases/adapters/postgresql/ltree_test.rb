@@ -1,15 +1,18 @@
 # encoding: utf-8
 require "cases/helper"
-require 'active_record/base'
-require 'active_record/connection_adapters/postgresql_adapter'
+require 'support/schema_dumping_helper'
 
 class PostgresqlLtreeTest < ActiveRecord::TestCase
+  include SchemaDumpingHelper
   class Ltree < ActiveRecord::Base
     self.table_name = 'ltrees'
   end
 
   def setup
     @connection = ActiveRecord::Base.connection
+
+    enable_extension!('ltree', @connection)
+
     @connection.transaction do
       @connection.create_table('ltrees') do |t|
         t.ltree 'path'
@@ -19,13 +22,19 @@ class PostgresqlLtreeTest < ActiveRecord::TestCase
     skip "do not test on PG without ltree"
   end
 
-  def teardown
+  teardown do
     @connection.execute 'drop table if exists ltrees'
   end
 
   def test_column
     column = Ltree.columns_hash['path']
     assert_equal :ltree, column.type
+    assert_equal "ltree", column.sql_type
+    assert_not column.array?
+
+    type = Ltree.type_for_attribute('path')
+    assert_not type.number?
+    assert_not type.binary?
   end
 
   def test_write
@@ -37,5 +46,10 @@ class PostgresqlLtreeTest < ActiveRecord::TestCase
     @connection.execute "insert into ltrees (path) VALUES ('1.2.3')"
     ltree = Ltree.first
     assert_equal '1.2.3', ltree.path
+  end
+
+  def test_schema_dump_with_shorthand
+    output = dump_table_schema("ltrees")
+    assert_match %r[t\.ltree "path"], output
   end
 end

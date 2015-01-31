@@ -6,9 +6,19 @@ module DateAndTimeBehavior
     assert_equal date_time_init(2005,2,28,10,10,10), date_time_init(2005,3,2,10,10,10).yesterday.yesterday
   end
 
+  def test_prev_day
+    assert_equal date_time_init(2005,2,21,10,10,10), date_time_init(2005,2,22,10,10,10).prev_day
+    assert_equal date_time_init(2005,2,28,10,10,10), date_time_init(2005,3,2,10,10,10).prev_day.prev_day
+  end
+
   def test_tomorrow
     assert_equal date_time_init(2005,2,23,10,10,10), date_time_init(2005,2,22,10,10,10).tomorrow
     assert_equal date_time_init(2005,3,2,10,10,10),  date_time_init(2005,2,28,10,10,10).tomorrow.tomorrow
+  end
+
+  def test_next_day
+    assert_equal date_time_init(2005,2,23,10,10,10), date_time_init(2005,2,22,10,10,10).next_day
+    assert_equal date_time_init(2005,3,2,10,10,10),  date_time_init(2005,2,28,10,10,10).next_day.next_day
   end
 
   def test_days_ago
@@ -95,6 +105,11 @@ module DateAndTimeBehavior
   end
 
   def test_next_week
+    #   M   |   T  | W | T | F | S | S #   M   | T |   W   | T |  F  | S | S #
+    #       | 22/2 |   |   |   |   |   # 28/2  |   |       |   |     |   |   # monday in next week `next_week`
+    #       | 22/2 |   |   |   |   |   #       |   |       |   | 4/3 |   |   # friday in next week `next_week(:friday)`
+    # 23/10 |      |   |   |   |   |   # 30/10 |   |       |   |     |   |   # monday in next week `next_week`
+    # 23/10 |      |   |   |   |   |   #       |   |  1/11 |   |     |   |   # wednesday in next week `next_week(:wednesday)`
     assert_equal date_time_init(2005,2,28,0,0,0),  date_time_init(2005,2,22,15,15,10).next_week
     assert_equal date_time_init(2005,3,4,0,0,0),   date_time_init(2005,2,22,15,15,10).next_week(:friday)
     assert_equal date_time_init(2006,10,30,0,0,0), date_time_init(2006,10,23,0,0,0).next_week
@@ -108,6 +123,28 @@ module DateAndTimeBehavior
       assert_equal Time.local(2012, 3, 27), Time.local(2012, 3, 21).next_week(:tuesday)
       assert_equal Time.local(2012, 4, 02), Time.local(2012, 3, 21).next_week(:monday)
     end
+  end
+
+  def test_next_week_at_same_time
+    assert_equal date_time_init(2005,2,28,15,15,10),  date_time_init(2005,2,22,15,15,10).next_week(:monday, same_time: true)
+    assert_equal date_time_init(2005,3,4,15,15,10),   date_time_init(2005,2,22,15,15,10).next_week(:friday, same_time: true)
+    assert_equal date_time_init(2006,10,30,0,0,0), date_time_init(2006,10,23,0,0,0).next_week(:monday, same_time: true)
+    assert_equal date_time_init(2006,11,1,0,0,0),  date_time_init(2006,10,23,0,0,0).next_week(:wednesday, same_time: true)
+  end
+
+  def test_next_weekday_on_wednesday
+    assert_equal date_time_init(2015,1,8,0,0,0), date_time_init(2015,1,7,0,0,0).next_weekday
+    assert_equal date_time_init(2015,1,8,15,15,10), date_time_init(2015,1,7,15,15,10).next_weekday
+  end
+
+  def test_next_weekday_on_friday
+    assert_equal date_time_init(2015,1,5,0,0,0), date_time_init(2015,1,2,0,0,0).next_weekday
+    assert_equal date_time_init(2015,1,5,15,15,10), date_time_init(2015,1,2,15,15,10).next_weekday
+  end
+
+  def test_next_weekday_on_saturday
+    assert_equal date_time_init(2015,1,5,0,0,0), date_time_init(2015,1,3,0,0,0).next_weekday
+    assert_equal date_time_init(2015,1,5,15,15,10), date_time_init(2015,1,3,15,15,10).next_weekday
   end
 
   def test_next_month_on_31st
@@ -137,6 +174,29 @@ module DateAndTimeBehavior
       assert_equal Time.local(2012, 3, 13), Time.local(2012, 3, 21).prev_week(:tuesday)
       assert_equal Time.local(2012, 3, 19), Time.local(2012, 3, 21).prev_week(:monday)
     end
+  end
+
+  def test_prev_week_at_same_time
+    assert_equal date_time_init(2005,2,21,15,15,10),  date_time_init(2005,3,1,15,15,10).prev_week(:monday, same_time: true)
+    assert_equal date_time_init(2005,2,22,15,15,10),  date_time_init(2005,3,1,15,15,10).prev_week(:tuesday, same_time: true)
+    assert_equal date_time_init(2005,2,25,15,15,10),  date_time_init(2005,3,1,15,15,10).prev_week(:friday, same_time: true)
+    assert_equal date_time_init(2006,10,30,0,0,0), date_time_init(2006,11,6,0,0,0).prev_week(:monday, same_time: true)
+    assert_equal date_time_init(2006,11,15,0,0,0), date_time_init(2006,11,23,0,0,0).prev_week(:wednesday, same_time: true)
+  end
+
+  def test_prev_weekday_on_wednesday
+    assert_equal date_time_init(2015,1,6,0,0,0), date_time_init(2015,1,7,0,0,0).prev_weekday
+    assert_equal date_time_init(2015,1,6,15,15,10), date_time_init(2015,1,7,15,15,10).prev_weekday
+  end
+
+  def test_prev_weekday_on_monday
+    assert_equal date_time_init(2015,1,2,0,0,0), date_time_init(2015,1,5,0,0,0).prev_weekday
+    assert_equal date_time_init(2015,1,2,15,15,10), date_time_init(2015,1,5,15,15,10).prev_weekday
+  end
+
+  def test_prev_weekday_on_sunday
+    assert_equal date_time_init(2015,1,2,0,0,0), date_time_init(2015,1,4,0,0,0).prev_weekday
+    assert_equal date_time_init(2015,1,2,15,15,10), date_time_init(2015,1,4,15,15,10).prev_weekday
   end
 
   def test_prev_month_on_31st
@@ -224,6 +284,21 @@ module DateAndTimeBehavior
     with_bw_default(:wednesday) do
       assert_equal date_time_init(2012,9,23,23,59,59, Rational(999999999, 1000)), date_time_init(2012,9,19,0,0,0).sunday
     end
+  end
+
+  def test_on_weekend_on_saturday
+    assert date_time_init(2015,1,3,0,0,0).on_weekend?
+    assert date_time_init(2015,1,3,15,15,10).on_weekend?
+  end
+
+  def test_on_weekend_on_sunday
+    assert date_time_init(2015,1,4,0,0,0).on_weekend?
+    assert date_time_init(2015,1,4,15,15,10).on_weekend?
+  end
+
+  def test_on_weekend_on_monday
+    assert_not date_time_init(2015,1,5,0,0,0).on_weekend?
+    assert_not date_time_init(2015,1,5,15,15,10).on_weekend?
   end
 
   def with_bw_default(bw = :monday)

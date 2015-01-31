@@ -8,8 +8,12 @@ class ShowExceptionsTest < ActionDispatch::IntegrationTest
       case req.path
       when "/not_found"
         raise AbstractController::ActionNotFound
+      when "/bad_params"
+        raise ActionDispatch::ParamsParser::ParseError.new("", StandardError.new)
       when "/method_not_allowed"
         raise ActionController::MethodNotAllowed
+      when "/unknown_http_method"
+        raise ActionController::UnknownHttpMethod
       when "/not_found_original_exception"
         raise ActionView::Template::Error.new('template', AbstractController::ActionNotFound.new)
       else
@@ -23,22 +27,30 @@ class ShowExceptionsTest < ActionDispatch::IntegrationTest
   test "skip exceptions app if not showing exceptions" do
     @app = ProductionApp
     assert_raise RuntimeError do
-      get "/", {}, {'action_dispatch.show_exceptions' => false}
+      get "/", headers: { 'action_dispatch.show_exceptions' => false }
     end
   end
 
   test "rescue with error page" do
     @app = ProductionApp
 
-    get "/", {}, {'action_dispatch.show_exceptions' => true}
+    get "/", headers: { 'action_dispatch.show_exceptions' => true }
     assert_response 500
     assert_equal "500 error fixture\n", body
 
-    get "/not_found", {}, {'action_dispatch.show_exceptions' => true}
+    get "/bad_params", headers: { 'action_dispatch.show_exceptions' => true }
+    assert_response 400
+    assert_equal "400 error fixture\n", body
+
+    get "/not_found", headers: { 'action_dispatch.show_exceptions' => true }
     assert_response 404
     assert_equal "404 error fixture\n", body
 
-    get "/method_not_allowed", {}, {'action_dispatch.show_exceptions' => true}
+    get "/method_not_allowed", headers: { 'action_dispatch.show_exceptions' => true }
+    assert_response 405
+    assert_equal "", body
+
+    get "/unknown_http_method", headers: { 'action_dispatch.show_exceptions' => true }
     assert_response 405
     assert_equal "", body
   end
@@ -49,11 +61,11 @@ class ShowExceptionsTest < ActionDispatch::IntegrationTest
     begin
       @app = ProductionApp
 
-      get "/", {}, {'action_dispatch.show_exceptions' => true}
+      get "/", headers: { 'action_dispatch.show_exceptions' => true }
       assert_response 500
       assert_equal "500 localized error fixture\n", body
 
-      get "/not_found", {}, {'action_dispatch.show_exceptions' => true}
+      get "/not_found", headers: { 'action_dispatch.show_exceptions' => true }
       assert_response 404
       assert_equal "404 error fixture\n", body
     ensure
@@ -64,14 +76,14 @@ class ShowExceptionsTest < ActionDispatch::IntegrationTest
   test "sets the HTTP charset parameter" do
     @app = ProductionApp
 
-    get "/", {}, {'action_dispatch.show_exceptions' => true}
+    get "/", headers: { 'action_dispatch.show_exceptions' => true }
     assert_equal "text/html; charset=utf-8", response.headers["Content-Type"]
   end
 
   test "show registered original exception for wrapped exceptions" do
     @app = ProductionApp
 
-    get "/not_found_original_exception", {}, {'action_dispatch.show_exceptions' => true}
+    get "/not_found_original_exception", headers: { 'action_dispatch.show_exceptions' => true }
     assert_response 404
     assert_match(/404 error/, body)
   end
@@ -80,11 +92,12 @@ class ShowExceptionsTest < ActionDispatch::IntegrationTest
     exceptions_app = lambda do |env|
       assert_kind_of AbstractController::ActionNotFound, env["action_dispatch.exception"]
       assert_equal "/404", env["PATH_INFO"]
+      assert_equal "/not_found_original_exception", env["action_dispatch.original_path"]
       [404, { "Content-Type" => "text/plain" }, ["YOU FAILED BRO"]]
     end
 
     @app = ActionDispatch::ShowExceptions.new(Boomer.new, exceptions_app)
-    get "/not_found_original_exception", {}, {'action_dispatch.show_exceptions' => true}
+    get "/not_found_original_exception", headers: { 'action_dispatch.show_exceptions' => true }
     assert_response 404
     assert_equal "YOU FAILED BRO", body
   end
@@ -95,7 +108,7 @@ class ShowExceptionsTest < ActionDispatch::IntegrationTest
     end
 
     @app = ActionDispatch::ShowExceptions.new(Boomer.new, exceptions_app)
-    get "/method_not_allowed", {}, {'action_dispatch.show_exceptions' => true}
+    get "/method_not_allowed", headers: { 'action_dispatch.show_exceptions' => true }
     assert_response 405
     assert_equal "", body
   end
